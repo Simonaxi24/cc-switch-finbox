@@ -26,10 +26,24 @@ fn parse_app_type(app: &str) -> Result<AppType, String> {
 
 // ========== 统一管理命令 ==========
 
-/// 获取所有已安装的 Skills
+/// 获取已安装的全局 Skills，传入项目路径时包含该项目的项目级 Skills
 #[tauri::command]
-pub fn get_installed_skills(app_state: State<'_, AppState>) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::get_all_installed(&app_state.db).map_err(|e| e.to_string())
+pub fn get_installed_skills(
+    app_state: State<'_, AppState>,
+    project_path: Option<String>,
+) -> Result<Vec<InstalledSkill>, String> {
+    SkillService::get_skills_by_scope(&app_state.db, project_path.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// 获取指定项目的 Skills（全局 + 当前项目）
+#[tauri::command]
+pub fn get_project_skills(
+    project_path: String,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<InstalledSkill>, String> {
+    SkillService::get_skills_by_scope(&app_state.db, Some(project_path.as_str()))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -52,14 +66,23 @@ pub fn delete_skill_backup(backup_id: String) -> Result<bool, String> {
 pub async fn install_skill_unified(
     skill: DiscoverableSkill,
     current_app: String,
+    scope: Option<String>,
+    project_path: Option<String>,
     service: State<'_, SkillServiceState>,
     app_state: State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
     let app_type = parse_app_type(&current_app)?;
+    let scope = scope.unwrap_or_else(|| "global".to_string());
 
     service
         .0
-        .install(&app_state.db, &skill, &app_type)
+        .install(
+            &app_state.db,
+            &skill,
+            &app_type,
+            &scope,
+            project_path.as_deref(),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -254,7 +277,7 @@ pub async fn install_skill_for_app(
 
     service
         .0
-        .install(&app_state.db, &skill, &app_type)
+        .install(&app_state.db, &skill, &app_type, "global", None)
         .await
         .map_err(|e| e.to_string())?;
 

@@ -11,7 +11,32 @@ use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::services::skill::SkillRepo;
 use indexmap::IndexMap;
-use rusqlite::params;
+use rusqlite::{params, Row};
+
+fn row_to_installed_skill(row: &Row<'_>) -> rusqlite::Result<InstalledSkill> {
+    Ok(InstalledSkill {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        directory: row.get(3)?,
+        repo_owner: row.get(4)?,
+        repo_name: row.get(5)?,
+        repo_branch: row.get(6)?,
+        readme_url: row.get(7)?,
+        apps: SkillApps {
+            claude: row.get(8)?,
+            codex: row.get(9)?,
+            gemini: row.get(10)?,
+            opencode: row.get(11)?,
+            hermes: row.get(12)?,
+        },
+        installed_at: row.get(13)?,
+        content_hash: row.get(14)?,
+        updated_at: row.get::<_, i64>(15).unwrap_or(0),
+        scope: row.get(16).unwrap_or_else(|_| "global".to_string()),
+        project_path: row.get(17).ok(),
+    })
+}
 
 impl Database {
     // ========== InstalledSkill CRUD ==========
@@ -29,30 +54,7 @@ impl Database {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let skill_iter = stmt
-            .query_map([], |row| {
-                Ok(InstalledSkill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    description: row.get(2)?,
-                    directory: row.get(3)?,
-                    repo_owner: row.get(4)?,
-                    repo_name: row.get(5)?,
-                    repo_branch: row.get(6)?,
-                    readme_url: row.get(7)?,
-                    apps: SkillApps {
-                        claude: row.get(8)?,
-                        codex: row.get(9)?,
-                        gemini: row.get(10)?,
-                        opencode: row.get(11)?,
-                        hermes: row.get(12)?,
-                    },
-                    installed_at: row.get(13)?,
-                    content_hash: row.get(14)?,
-                    updated_at: row.get::<_, i64>(15).unwrap_or(0),
-                    scope: row.get(16).unwrap_or_else(|_| "global".to_string()),
-                    project_path: row.get(17).ok(),
-                })
-            })
+            .query_map([], row_to_installed_skill)
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         let mut skills = IndexMap::new();
@@ -60,6 +62,51 @@ impl Database {
             let skill = skill_res.map_err(|e| AppError::Database(e.to_string()))?;
             skills.insert(skill.id.clone(), skill);
         }
+        Ok(skills)
+    }
+
+    /// 获取全局 Skill + 指定项目的项目级 Skill；未指定项目时仅返回全局 Skill
+    pub fn get_skills_by_scope(
+        &self,
+        project_path: Option<&str>,
+    ) -> Result<Vec<InstalledSkill>, AppError> {
+        let conn = lock_conn!(self.conn);
+        let mut skills = Vec::new();
+
+        if let Some(pp) = project_path {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
+                            readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode,
+                            enabled_hermes, installed_at, content_hash, updated_at, scope, project_path
+                     FROM skills
+                     WHERE scope = 'global' OR (scope = 'project' AND project_path = ?1)
+                     ORDER BY name ASC",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let skill_iter = stmt
+                .query_map(params![pp], row_to_installed_skill)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for skill_res in skill_iter {
+                skills.push(skill_res.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
+                            readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode,
+                            enabled_hermes, installed_at, content_hash, updated_at, scope, project_path
+                     FROM skills WHERE scope = 'global' ORDER BY name ASC",
+                )
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let skill_iter = stmt
+                .query_map([], row_to_installed_skill)
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            for skill_res in skill_iter {
+                skills.push(skill_res.map_err(|e| AppError::Database(e.to_string()))?);
+            }
+        }
+
         Ok(skills)
     }
 
@@ -75,30 +122,7 @@ impl Database {
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let result = stmt.query_row([id], |row| {
-            Ok(InstalledSkill {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                directory: row.get(3)?,
-                repo_owner: row.get(4)?,
-                repo_name: row.get(5)?,
-                repo_branch: row.get(6)?,
-                readme_url: row.get(7)?,
-                apps: SkillApps {
-                    claude: row.get(8)?,
-                    codex: row.get(9)?,
-                    gemini: row.get(10)?,
-                    opencode: row.get(11)?,
-                    hermes: row.get(12)?,
-                },
-                installed_at: row.get(13)?,
-                content_hash: row.get(14)?,
-                updated_at: row.get::<_, i64>(15).unwrap_or(0),
-                scope: row.get(16).unwrap_or_else(|_| "global".to_string()),
-                project_path: row.get(17).ok(),
-            })
-        });
+        let result = stmt.query_row([id], row_to_installed_skill);
 
         match result {
             Ok(skill) => Ok(Some(skill)),

@@ -564,6 +564,14 @@ impl SkillService {
         Ok(skills.into_values().collect())
     }
 
+    /// 获取全局 Skill + 指定项目的项目级 Skill；未指定项目时仅返回全局 Skill
+    pub fn get_skills_by_scope(
+        db: &Arc<Database>,
+        project_path: Option<&str>,
+    ) -> Result<Vec<InstalledSkill>> {
+        Ok(db.get_skills_by_scope(project_path)?)
+    }
+
     /// 安装 Skill
     ///
     /// 流程：
@@ -575,8 +583,23 @@ impl SkillService {
         db: &Arc<Database>,
         skill: &DiscoverableSkill,
         current_app: &AppType,
+        scope: &str,
+        project_path: Option<&str>,
     ) -> Result<InstalledSkill> {
-        let ssot_dir = Self::get_ssot_dir()?;
+        let scope = if scope == "project" { "project" } else { "global" };
+        let project_path = if scope == "project" {
+            Some(project_path.ok_or_else(|| anyhow!("项目级 skill 必须指定 project_path"))?)
+        } else {
+            None
+        };
+        let install_base_dir = if scope == "project" {
+            PathBuf::from(project_path.expect("project_path validated above"))
+                .join(".claude")
+                .join("skills")
+        } else {
+            Self::get_ssot_dir()?
+        };
+        fs::create_dir_all(&install_base_dir)?;
 
         // 允许多级目录（如 a/b/c），但必须是安全的相对路径。
         let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
@@ -598,10 +621,12 @@ impl SkillService {
                 ))
             })?;
 
-        // 检查数据库中是否已有同名 directory 的 skill（来自其他仓库）
+        // 检查同一安装位置中是否已有同名 directory 的 skill（来自其他仓库）
         let existing_skills = db.get_all_installed_skills()?;
         for existing in existing_skills.values() {
-            if existing.directory.eq_ignore_ascii_case(&install_name) {
+            let same_location = existing.scope == scope
+                && (scope == "global" || existing.project_path.as_deref() == project_path);
+            if same_location && existing.directory.eq_ignore_ascii_case(&install_name) {
                 // 检查是否来自同一仓库
                 let same_repo = existing.repo_owner.as_deref() == Some(&skill.repo_owner)
                     && existing.repo_name.as_deref() == Some(&skill.repo_name);
@@ -610,7 +635,9 @@ impl SkillService {
                     let mut updated = existing.clone();
                     updated.apps.set_enabled_for(current_app, true);
                     db.save_skill(&updated)?;
-                    Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    if scope == "global" {
+                        Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    }
                     log::info!(
                         "Skill {} 已存在，更新 {:?} 启用状态",
                         updated.name,
@@ -642,7 +669,7 @@ impl SkillService {
             }
         }
 
-        let dest = ssot_dir.join(&install_name);
+        let dest = install_base_dir.join(&install_name);
 
         let mut repo_branch = skill.repo_branch.clone();
 
@@ -738,6 +765,16 @@ impl SkillService {
             &doc_path,
         ));
 
+        let skill_id = if let Some(pp) = project_path {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(pp.as_bytes());
+            let project_hash = format!("{:x}", hasher.finalize());
+            format!("{}:project:{}", skill.key, &project_hash[..16])
+        } else {
+            skill.key.clone()
+        };
+
         // 创建 InstalledSkill 记录
         // 计算内容哈希
         let content_hash = Self::compute_dir_hash(&dest).map(Some).unwrap_or_else(|e| {
@@ -746,7 +783,7 @@ impl SkillService {
         });
 
         let installed_skill = InstalledSkill {
-            id: skill.key.clone(),
+            id: skill_id,
             name: skill.name.clone(),
             description: if skill.description.is_empty() {
                 None
@@ -762,15 +799,17 @@ impl SkillService {
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
-            scope: "global".to_string(),
-            project_path: None,
+            scope: scope.to_string(),
+            project_path: project_path.map(str::to_string),
         };
 
         // 保存到数据库
         db.save_skill(&installed_skill)?;
 
-        // 同步到当前应用目录
-        Self::sync_to_app_dir(&install_name, current_app)?;
+        // 全局 Skill 同步到当前应用目录；项目级 Skill 已直接安装到项目 .claude/skills
+        if scope == "global" {
+            Self::sync_to_app_dir(&install_name, current_app)?;
+        }
 
         log::info!(
             "Skill {} 安装成功，已启用 {:?}",
