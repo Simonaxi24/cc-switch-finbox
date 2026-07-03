@@ -43,6 +43,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FinboxMarketplacePanel } from "./FinboxMarketplacePanel";
 
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
@@ -400,45 +402,68 @@ const UnifiedSkillsPanel = React.forwardRef<
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
-        {isLoading ? (
-          <div className="text-center py-12 text-muted-foreground">
-            {t("skills.loading")}
+      <Tabs
+        defaultValue="installed"
+        className="flex flex-1 min-h-0 flex-col overflow-hidden"
+      >
+        <TabsList className="mt-3 w-fit">
+          <TabsTrigger value="installed">
+            {t("skills.installedTab")}
+          </TabsTrigger>
+          <TabsTrigger value="finbox">{t("skills.finboxTab")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="installed"
+          className="flex-1 min-h-0 overflow-hidden"
+        >
+          <div className="h-full overflow-y-auto overflow-x-hidden pb-24">
+            {isLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                {t("skills.loading")}
+              </div>
+            ) : !skills || skills.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
+                  <Sparkles size={24} className="text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-medium text-foreground mb-2">
+                  {t("skills.noInstalled")}
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  {t("skills.noInstalledDescription")}
+                </p>
+              </div>
+            ) : (
+              <TooltipProvider delayDuration={300}>
+                <div className="rounded-xl border border-border-default overflow-hidden">
+                  {skills.map((skill, index) => (
+                    <InstalledSkillListItem
+                      key={skill.id}
+                      skill={skill}
+                      hasUpdate={!!updatesMap[skill.id]}
+                      isUpdating={
+                        updateSkillMutation.isPending &&
+                        updateSkillMutation.variables === skill.id
+                      }
+                      onToggleApp={handleToggleApp}
+                      onUninstall={() => handleUninstall(skill)}
+                      onUpdate={() => handleUpdateSkill(skill)}
+                      isLast={index === skills.length - 1}
+                    />
+                  ))}
+                </div>
+              </TooltipProvider>
+            )}
           </div>
-        ) : !skills || skills.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-              <Sparkles size={24} className="text-muted-foreground" />
-            </div>
-            <h3 className="text-lg font-medium text-foreground mb-2">
-              {t("skills.noInstalled")}
-            </h3>
-            <p className="text-muted-foreground text-sm">
-              {t("skills.noInstalledDescription")}
-            </p>
+        </TabsContent>
+
+        <TabsContent value="finbox" className="flex-1 min-h-0 overflow-hidden">
+          <div className="h-full overflow-y-auto overflow-x-hidden pb-24">
+            <FinboxMarketplacePanel currentApp={currentApp} />
           </div>
-        ) : (
-          <TooltipProvider delayDuration={300}>
-            <div className="rounded-xl border border-border-default overflow-hidden">
-              {skills.map((skill, index) => (
-                <InstalledSkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  hasUpdate={!!updatesMap[skill.id]}
-                  isUpdating={
-                    updateSkillMutation.isPending &&
-                    updateSkillMutation.variables === skill.id
-                  }
-                  onToggleApp={handleToggleApp}
-                  onUninstall={() => handleUninstall(skill)}
-                  onUpdate={() => handleUpdateSkill(skill)}
-                  isLast={index === skills.length - 1}
-                />
-              ))}
-            </div>
-          </TooltipProvider>
-        )}
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {confirmDialog && (
         <ConfirmDialog
