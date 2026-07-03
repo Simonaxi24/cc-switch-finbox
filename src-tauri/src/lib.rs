@@ -53,11 +53,10 @@ pub use mcp::{
 pub use provider::{Provider, ProviderMeta};
 pub use services::{
     skill::{migrate_skills_to_ssot, ImportSkillSelection},
-    ConfigService, EndpointLatency, McpService, PromptService, ProviderService, ProxyService,
-    SkillService, SpeedtestService,
+    ConfigService, EndpointLatency, FinboxMarketplaceService, McpService, PromptService,
+    ProviderService, ProxyService, SkillService, SpeedtestService,
 };
 pub use settings::{update_settings, AppSettings};
-pub use store::AppState;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
@@ -965,6 +964,12 @@ pub fn run() {
             let skill_service = SkillService::new();
             app.manage(commands::skill::SkillServiceState(Arc::new(skill_service)));
 
+            // 初始化 FinboxMarketplaceService
+            let finbox_service = FinboxMarketplaceService::new();
+            app.manage(commands::finbox_marketplace::FinboxServiceState(Arc::new(
+                finbox_service,
+            )));
+
             // 初始化 CopilotAuthManager
             {
                 use crate::proxy::providers::copilot_auth::CopilotAuthManager;
@@ -1330,6 +1335,11 @@ pub fn run() {
             commands::update_skill,
             commands::migrate_skill_storage,
             commands::search_skills_sh,
+            // Finbox Marketplace
+            commands::finbox_marketplace::search_finbox_skills,
+            commands::finbox_marketplace::get_finbox_skill_detail,
+            commands::finbox_marketplace::install_from_finbox,
+            commands::finbox_marketplace::refresh_finbox_cache,
             // Skill management (legacy API compatibility)
             commands::get_skills,
             commands::get_skills_for_app,

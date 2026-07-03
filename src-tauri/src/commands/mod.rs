@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+pub use crate::store::AppState;
+
 mod auth;
 mod balance;
 mod codex_oauth;
@@ -9,6 +11,7 @@ mod copilot;
 mod deeplink;
 mod env;
 mod failover;
+pub mod finbox_marketplace;
 mod global_proxy;
 mod hermes;
 mod import_export;
@@ -43,6 +46,7 @@ pub use copilot::*;
 pub use deeplink::*;
 pub use env::*;
 pub use failover::*;
+pub use finbox_marketplace::*;
 pub use global_proxy::*;
 pub use hermes::*;
 pub use import_export::*;
