@@ -1509,4 +1509,18 @@ base_url = "https://cc-api.pipellm.ai/v1"`,
     endpointCandidates: ["https://api.therouter.ai/v1"],
     category: "aggregator",
   },
+  {
+    name: "Joybuilder",
+    websiteUrl: "https://PLACEHOLDER",
+    apiKeyUrl: "https://PLACEHOLDER",
+    auth: generateThirdPartyAuth(""),
+    config: generateThirdPartyConfig(
+      "joybuilder",
+      "https://PLACEHOLDER/v1",
+      "PLACEHOLDER",
+    ),
+    category: "third_party",
+    icon: "joybuilder",
+    iconColor: "#6366F1",
+  },
 ];

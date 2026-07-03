@@ -447,6 +447,23 @@ export const geminiProviderPresets: GeminiProviderPreset[] = [
     endpointCandidates: ["https://api.therouter.ai"],
   },
   {
+    name: "Joybuilder",
+    websiteUrl: "https://PLACEHOLDER",
+    apiKeyUrl: "https://PLACEHOLDER",
+    settingsConfig: {
+      env: {
+        GOOGLE_GEMINI_BASE_URL: "https://PLACEHOLDER",
+        GEMINI_MODEL: "PLACEHOLDER",
+      },
+    },
+    baseURL: "https://PLACEHOLDER",
+    model: "PLACEHOLDER",
+    description: "Joybuilder",
+    category: "third_party",
+    icon: "joybuilder",
+    iconColor: "#6366F1",
+  },
+  {
     name: "自定义",
     websiteUrl: "",
     settingsConfig: {

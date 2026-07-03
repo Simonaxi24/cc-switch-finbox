@@ -1376,4 +1376,23 @@ export const providerPresets: ProviderPreset[] = [
     icon: "aws",
     iconColor: "#FF9900",
   },
+  {
+    name: "Joybuilder",
+    websiteUrl: "https://PLACEHOLDER",
+    apiKeyUrl: "https://PLACEHOLDER",
+    settingsConfig: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://PLACEHOLDER/v1",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_MODEL: "PLACEHOLDER",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "PLACEHOLDER",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "PLACEHOLDER",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "PLACEHOLDER",
+      },
+    },
+    category: "third_party",
+    icon: "joybuilder",
+    iconColor: "#6366F1",
+    apiFormat: "openai_chat",
+  },
 ];

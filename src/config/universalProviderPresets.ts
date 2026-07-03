@@ -75,6 +75,34 @@ export const universalProviderPresets: UniversalProviderPreset[] = [
       "NewAPI 是一个可自部署的 API 网关，支持 Anthropic、OpenAI、Gemini 等多种协议",
   },
   {
+    name: "Joybuilder",
+    providerType: "joybuilder",
+    defaultApps: {
+      claude: true,
+      codex: true,
+      gemini: true,
+    },
+    defaultModels: {
+      claude: {
+        model: "PLACEHOLDER",
+        haikuModel: "PLACEHOLDER",
+        sonnetModel: "PLACEHOLDER",
+        opusModel: "PLACEHOLDER",
+      },
+      codex: {
+        model: "PLACEHOLDER",
+        reasoningEffort: "high",
+      },
+      gemini: {
+        model: "PLACEHOLDER",
+      },
+    },
+    websiteUrl: "https://PLACEHOLDER",
+    icon: "joybuilder",
+    iconColor: "#6366F1",
+    description: "Joybuilder API 供应商",
+  },
+  {
     name: "自定义网关",
     providerType: "custom_gateway",
     defaultApps: {
