@@ -175,6 +175,12 @@ function App() {
   const [currentView, setCurrentView] = useState<View>(getInitialView);
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
+  const [skillsInstallScope, setSkillsInstallScope] = useState<
+    "global" | "project"
+  >("global");
+  const [skillsInstallProjectPath, setSkillsInstallProjectPath] = useState<
+    string | undefined
+  >(undefined);
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
@@ -867,7 +873,12 @@ function App() {
     }
   };
 
-  const handleOpenSkillsDiscovery = () => {
+  const handleOpenSkillsDiscovery = (
+    scope: "global" | "project" = "global",
+    projectPath?: string,
+  ) => {
+    setSkillsInstallScope(scope);
+    setSkillsInstallProjectPath(scope === "project" ? projectPath : undefined);
     setSkillsDiscoverySource("repos");
     setCurrentView("skillsDiscovery");
   };
@@ -912,6 +923,8 @@ function App() {
               initialApp={
                 sharedFeatureApp === "openclaw" ? "claude" : sharedFeatureApp
               }
+              installScope={skillsInstallScope}
+              installProjectPath={skillsInstallProjectPath}
               onSourceChange={setSkillsDiscoverySource}
             />
           );
@@ -1339,7 +1352,7 @@ function App() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={handleOpenSkillsDiscovery}
+                      onClick={() => handleOpenSkillsDiscovery()}
                       className="hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       <Search className="w-4 h-4 mr-2" />

@@ -46,6 +46,8 @@ export type SkillsPageSource = "repos" | "skillssh";
 
 interface SkillsPageProps {
   initialApp?: AppId;
+  installScope?: "global" | "project";
+  installProjectPath?: string;
   onSourceChange?: (source: SkillsPageSource) => void;
 }
 
@@ -91,7 +93,15 @@ const SKILLSSH_PAGE_SIZE = 20;
  * 用于浏览和安装来自仓库或 skills.sh 的 Skills
  */
 export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
-  ({ initialApp = "claude", onSourceChange }, ref) => {
+  (
+    {
+      initialApp = "claude",
+      installScope = "global",
+      installProjectPath,
+      onSourceChange,
+    },
+    ref,
+  ) => {
     const { t } = useTranslation();
     const [repoManagerOpen, setRepoManagerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -254,6 +264,9 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
         await installMutation.mutateAsync({
           skill,
           currentApp,
+          scope: installScope,
+          projectPath:
+            installScope === "project" ? installProjectPath : undefined,
         });
         toast.success(t("skills.installSuccess", { name: skill.name }), {
           closeButton: true,

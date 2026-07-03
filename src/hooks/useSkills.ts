@@ -21,10 +21,13 @@ import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
  * 使用 staleTime: Infinity 和 placeholderData: keepPreviousData
  * 实现首次进入使用缓存，只有刷新时才重新获取
  */
-export function useInstalledSkills() {
+export function useInstalledSkills(
+  projectPath?: string,
+  scope: "global" | "project" = "global",
+) {
   return useQuery({
-    queryKey: ["skills", "installed"],
-    queryFn: () => skillsApi.getInstalled(),
+    queryKey: ["skills", "installed", scope, projectPath ?? null],
+    queryFn: () => skillsApi.getInstalled(projectPath),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
@@ -72,15 +75,19 @@ export function useInstallSkill() {
     mutationFn: ({
       skill,
       currentApp,
+      scope,
+      projectPath,
     }: {
       skill: DiscoverableSkill;
       currentApp: AppId;
-    }) => skillsApi.installUnified(skill, currentApp),
+      scope?: "global" | "project";
+      projectPath?: string;
+    }) => skillsApi.installUnified(skill, currentApp, scope, projectPath),
     onSuccess: (installedSkill, _vars, _ctx) => {
-      const { skill } = _vars;
+      const { skill, scope, projectPath } = _vars;
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        ["skills", "installed", scope ?? "global", projectPath ?? null],
         (oldData) => {
           if (!oldData) return [installedSkill];
           return [...oldData, installedSkill];
@@ -122,8 +129,8 @@ export function useUninstallSkill() {
         .then((result) => ({ ...result, skillKey })),
     onSuccess: ({ skillKey }, _vars) => {
       // 直接更新 installed 缓存，移除该 skill
-      queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+      queryClient.setQueriesData<InstalledSkill[]>(
+        { queryKey: ["skills", "installed"] },
         (oldData) => {
           if (!oldData) return oldData;
           return oldData.filter((s) => s.id !== _vars.id);
@@ -215,7 +222,7 @@ export function useImportSkillsFromApps() {
     onSuccess: (importedSkills) => {
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        ["skills", "installed", "global", null],
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
       // 刷新 unmanaged 列表（已被导入的应该移除）
@@ -280,7 +287,7 @@ export function useInstallSkillsFromZip() {
     onSuccess: (installedSkills) => {
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        ["skills", "installed", "global", null],
         (oldData) => {
           if (!oldData) return installedSkills;
           return [...oldData, ...installedSkills];
@@ -312,8 +319,8 @@ export function useUpdateSkill() {
   return useMutation({
     mutationFn: (id: string) => skillsApi.updateSkill(id),
     onSuccess: (updatedSkill) => {
-      queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+      queryClient.setQueriesData<InstalledSkill[]>(
+        { queryKey: ["skills", "installed"] },
         (oldData) => {
           if (!oldData) return [updatedSkill];
           return oldData.map((s) =>

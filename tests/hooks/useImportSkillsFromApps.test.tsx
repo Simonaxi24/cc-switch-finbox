@@ -17,6 +17,7 @@ function makeSkill(overrides: Partial<InstalledSkill> = {}): InstalledSkill {
     },
     installedAt: 0,
     updatedAt: 0,
+    scope: "global",
     ...overrides,
   };
 }

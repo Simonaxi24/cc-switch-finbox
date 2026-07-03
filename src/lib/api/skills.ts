@@ -141,8 +141,10 @@ export const skillsApi = {
   // ========== 统一管理 API (v3.10.0+) ==========
 
   /** 获取所有已安装的 Skills */
-  async getInstalled(): Promise<InstalledSkill[]> {
-    return await invoke("get_installed_skills");
+  async getInstalled(projectPath?: string): Promise<InstalledSkill[]> {
+    return await invoke("get_installed_skills", {
+      projectPath: projectPath ?? null,
+    });
   },
 
   /** 获取可恢复的 Skill 备份列表 */
@@ -159,8 +161,15 @@ export const skillsApi = {
   async installUnified(
     skill: DiscoverableSkill,
     currentApp: AppId,
+    scope?: "global" | "project",
+    projectPath?: string,
   ): Promise<InstalledSkill> {
-    return await invoke("install_skill_unified", { skill, currentApp });
+    return await invoke("install_skill_unified", {
+      skill,
+      currentApp,
+      scope: scope ?? "global",
+      projectPath: projectPath ?? null,
+    });
   },
 
   /** 卸载 Skill（统一卸载） */

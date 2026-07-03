@@ -1,13 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Sparkles,
-  Trash2,
-  ExternalLink,
-  RefreshCw,
-  Loader2,
-} from "lucide-react";
+import { Sparkles, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -45,9 +40,10 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { FinboxMarketplacePanel } from "./FinboxMarketplacePanel";
+import { SkillActionButtons } from "./SkillActionButtons";
 
 interface UnifiedSkillsPanelProps {
-  onOpenDiscovery: () => void;
+  onOpenDiscovery: (scope: "global" | "project", projectPath?: string) => void;
   currentApp: AppId;
 }
 
@@ -81,8 +77,15 @@ const UnifiedSkillsPanel = React.forwardRef<
   } | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [skillScope, setSkillScope] = useState<"global" | "project">("global");
+  const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
 
-  const { data: skills, isLoading } = useInstalledSkills();
+  const activeProjectPath =
+    skillScope === "project" ? currentProjectPath : undefined;
+  const { data: skills, isLoading } = useInstalledSkills(
+    activeProjectPath,
+    skillScope,
+  );
   const {
     data: skillBackups = [],
     refetch: refetchSkillBackups,
@@ -340,7 +343,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   React.useImperativeHandle(ref, () => ({
-    openDiscovery: onOpenDiscovery,
+    openDiscovery: () => onOpenDiscovery(skillScope, activeProjectPath),
     openImport: handleOpenImport,
     openInstallFromZip: handleInstallFromZip,
     openRestoreFromBackup: handleOpenRestoreFromBackup,
@@ -418,6 +421,31 @@ const UnifiedSkillsPanel = React.forwardRef<
           className="flex-1 min-h-0 overflow-hidden"
         >
           <div className="h-full overflow-y-auto overflow-x-hidden pb-24">
+            <div className="mb-4 mt-4 flex items-center gap-2">
+              <Button
+                variant={skillScope === "global" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSkillScope("global")}
+              >
+                {t("skills.globalSkills")}
+              </Button>
+              <Button
+                variant={skillScope === "project" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSkillScope("project")}
+              >
+                {t("skills.projectSkills")}
+              </Button>
+            </div>
+            {skillScope === "project" && (
+              <div className="mb-4">
+                <Input
+                  placeholder={t("skills.projectPathPlaceholder")}
+                  value={currentProjectPath}
+                  onChange={(e) => setCurrentProjectPath(e.target.value)}
+                />
+              </div>
+            )}
             {isLoading ? (
               <div className="text-center py-12 text-muted-foreground">
                 {t("skills.loading")}
@@ -559,6 +587,14 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
           <span className="text-xs text-muted-foreground/50 flex-shrink-0">
             {sourceLabel}
           </span>
+          <Badge
+            variant={skill.scope === "project" ? "secondary" : "outline"}
+            className="text-xs shrink-0"
+          >
+            {skill.scope === "project"
+              ? t("skills.projectScope")
+              : t("skills.globalScope")}
+          </Badge>
           {hasUpdate && (
             <Badge
               variant="outline"
@@ -585,36 +621,17 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
       />
 
       <div
-        className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         style={hasUpdate ? { opacity: 1 } : undefined}
       >
-        {hasUpdate && onUpdate && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 hover:text-blue-500 hover:bg-blue-100 dark:hover:text-blue-400 dark:hover:bg-blue-500/10"
-            onClick={onUpdate}
-            disabled={isUpdating}
-            title={t("skills.update")}
-          >
-            {isUpdating ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <RefreshCw size={14} />
-            )}
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 hover:text-red-500 hover:bg-red-100 dark:hover:text-red-400 dark:hover:bg-red-500/10"
-          onClick={onUninstall}
-          title={t("skills.uninstall")}
-        >
-          <Trash2 size={14} />
-        </Button>
+        <SkillActionButtons
+          scope={skill.scope}
+          skillId={skill.id}
+          skillName={skill.name}
+          onUpdate={hasUpdate ? onUpdate : undefined}
+          onUninstall={onUninstall}
+          isUpdating={isUpdating}
+        />
       </div>
     </ListItemRow>
   );
