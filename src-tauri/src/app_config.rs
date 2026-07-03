@@ -163,6 +163,10 @@ impl SkillApps {
     }
 }
 
+fn default_scope() -> String {
+    "global".to_string()
+}
+
 /// 已安装的 Skill（v3.10.0+ 统一结构）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +202,12 @@ pub struct InstalledSkill {
     /// 最近更新时间（Unix 时间戳，0 = 从未更新）
     #[serde(default)]
     pub updated_at: i64,
+    /// 作用域：'global'（全局）或 'project'（项目级）
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    /// 项目级 skill 所属的项目路径（全局 skill 为 None）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_path: Option<String>,
 }
 
 /// 未管理的 Skill（在应用目录中发现但未被 CC Switch 管理）

@@ -762,6 +762,8 @@ impl SkillService {
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
+            scope: "global".to_string(),
+            project_path: None,
         };
 
         // 保存到数据库
@@ -1100,6 +1102,8 @@ impl SkillService {
             installed_at: skill.installed_at,
             content_hash: new_hash,
             updated_at: chrono::Utc::now().timestamp(),
+            scope: skill.scope.clone(),
+            project_path: skill.project_path.clone(),
         };
 
         db.save_skill(&updated_skill)?;
@@ -1534,6 +1538,8 @@ impl SkillService {
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
+                scope: "global".to_string(),
+                project_path: None,
             };
 
             // 保存到数据库
@@ -2655,6 +2661,8 @@ impl SkillService {
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
+                scope: "global".to_string(),
+                project_path: None,
             };
 
             // 保存到数据库
@@ -3042,6 +3050,8 @@ pub fn migrate_skills_to_ssot(db: &Arc<Database>) -> Result<usize> {
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
+            scope: "global".to_string(),
+            project_path: None,
         };
 
         db.save_skill(&skill)?;

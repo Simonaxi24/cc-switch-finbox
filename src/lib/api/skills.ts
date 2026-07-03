@@ -36,6 +36,10 @@ export interface InstalledSkill {
   installedAt: number;
   contentHash?: string;
   updatedAt: number;
+  /** 作用域：'global' 或 'project' */
+  scope: "global" | "project";
+  /** 项目级 skill 所属的项目路径 */
+  projectPath?: string;
 }
 
 export interface SkillUninstallResult {
