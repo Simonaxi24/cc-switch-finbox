@@ -5,6 +5,8 @@ export { backupsApi } from "./settings";
 export { mcpApi } from "./mcp";
 export { promptsApi } from "./prompts";
 export { skillsApi } from "./skills";
+export { finboxApi } from "./finbox";
+export type { FinboxSkill, FinboxSkillDetail } from "./finbox";
 export { usageApi } from "./usage";
 export { subscriptionApi } from "./subscription";
 export { vscodeApi } from "./vscode";
