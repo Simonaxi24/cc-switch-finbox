@@ -92,9 +92,10 @@ function ProjectSkillGroup({
     [projectPath],
   );
 
+  // Always fetch when expanded (don't skip on isActive)
   useEffect(() => {
-    if (!isExpanded && !isActive) {
-      setLoading(true);
+    if (!isExpanded) {
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -104,6 +105,7 @@ function ProjectSkillGroup({
       .then((result) => {
         setProjectSkills(result);
         setLoading(false);
+        setError(null);
       })
       .catch((err) => {
         setError(String(err));

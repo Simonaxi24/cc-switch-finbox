@@ -66,6 +66,7 @@ impl Database {
     }
 
     /// 获取全局 Skill + 指定项目的项目级 Skill；未指定项目时仅返回全局 Skill
+    /// 指定项目时**只返回项目级 skill**（不包含全局）
     pub fn get_skills_by_scope(
         &self,
         project_path: Option<&str>,
@@ -80,7 +81,7 @@ impl Database {
                             readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_opencode,
                             enabled_hermes, installed_at, content_hash, updated_at, scope, project_path
                      FROM skills
-                     WHERE scope = 'global' OR (scope = 'project' AND project_path = ?1)
+                     WHERE scope = 'project' AND project_path = ?1
                      ORDER BY name ASC",
                 )
                 .map_err(|e| AppError::Database(e.to_string()))?;
