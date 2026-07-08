@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Sparkles,
@@ -9,7 +9,6 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
-  Monitor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,122 +66,6 @@ export interface UnifiedSkillsPanelHandle {
 }
 
 function formatSkillBackupDate(unixSeconds: number): string {
-
-/** 按项目分组展示 Skill 的折叠面板 */
-function ProjectSkillGroup({
-  projectPath,
-  isActive,
-  onSelect,
-  currentApp,
-  t,
-}: {
-  projectPath: string;
-  isActive: boolean;
-  onSelect: () => void;
-  currentApp: AppId;
-  t: ReturnType<typeof useTranslation>;
-}) {
-  const [isExpanded, setIsExpanded] = useState(isActive);
-  const [projectSkills, setProjectSkills] = useState<UnmanagedSkill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const projectName = useMemo(
-    () => projectPath.split("/").pop() || projectPath,
-    [projectPath],
-  );
-
-  // Always fetch when expanded (don't skip on isActive)
-  useEffect(() => {
-    if (!isExpanded) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    skillsApi
-      .scanUnmanaged(projectPath)
-      .then((result) => {
-        setProjectSkills(result);
-        setLoading(false);
-        setError(null);
-      })
-      .catch((err) => {
-        setError(String(err));
-        setLoading(false);
-      });
-  }, [projectPath, isExpanded]);
-
-  return (
-    <div className="border rounded-md bg-background p-2">
-      {/* 项目路径标题栏 */}
-      <button
-        type="button"
-        className="flex items-center gap-2 w-full text-left text-sm font-medium hover:bg-muted/50 rounded px-1 py-1"
-        onClick={() => {
-          onSelect();
-          setIsExpanded(!isExpanded);
-        }}
-      >
-        <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate">{projectName}</span>
-        <span className="text-xs text-muted-foreground/60 shrink-0 truncate max-w-[200px]">
-          {projectPath}
-        </span>
-        {isActive && (
-          <Badge variant="default" className="text-[10px] px-1 h-4">
-            {t("skills.selected")}
-          </Badge>
-        )}
-        {isExpanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0" />
-        )}
-      </button>
-
-      {/* 该项目的 skill 列表 */}
-      {(isExpanded || isActive) && (
-        <div className="mt-2 space-y-1 pl-4">
-          {loading ? (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {t("skills.loading")}
-            </div>
-          ) : error ? (
-            <div className="text-xs text-destructive py-2">{error}</div>
-          ) : projectSkills.length === 0 ? (
-            <div className="text-xs text-muted-foreground/60 py-2">
-              {t("skills.noSkillsInProject")}
-            </div>
-          ) : (
-            projectSkills.map((skill) => (
-              <div
-                key={skill.directory}
-                className="flex items-center justify-between rounded py-1 px-1 hover:bg-muted/30 text-sm"
-              >
-                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                  <span className="font-medium truncate text-sm">{skill.name}</span>
-                  {skill.description && (
-                    <span className="text-xs text-muted-foreground/60 truncate">
-                      {skill.description}
-                    </span>
-                  )}
-                </div>
-                {/* 显示发现来源 */}
-                <div className="flex items-center gap-1 ml-2 shrink-0">
-                  <span className="text-[10px] text-muted-foreground/40">
-                    {skill.foundIn.join(", ")}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
   const date = new Date(unixSeconds * 1000);
   return Number.isNaN(date.getTime())
     ? String(unixSeconds)
@@ -206,9 +89,12 @@ const UnifiedSkillsPanel = React.forwardRef<
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [skillScope, setSkillScope] = useState<"global" | "project">("global");
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
-  const [projectListOpen, setProjectListOpen] = useState(false);
+  // 项目列表（从 list_skill_projects 获取）
   const [projectList, setProjectList] = useState<string[] | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  // 每个项目的 skill 列表：projectPath -> UnmanagedSkill[]
+  const [projectSkillsMap, setProjectSkillsMap] = useState<Record<string, UnmanagedSkill[]>>({});
+  const [loadingProjectSkills, setLoadingProjectSkills] = useState<Record<string, boolean>>({});
 
   const activeProjectPath =
     skillScope === "project" ? currentProjectPath : undefined;
@@ -237,22 +123,6 @@ const UnifiedSkillsPanel = React.forwardRef<
   } = useCheckSkillUpdates();
   const updateSkillMutation = useUpdateSkill();
   const [isUpdatingAll, setIsUpdatingAll] = useState(false);
-
-  // Lazily fetch project list when switching to "project" scope
-  const handleFetchProjectList = useCallback(async () => {
-    setLoadingProjects(true);
-    try {
-      const list = await skillsApi.listSkillProjects();
-      setProjectList(list);
-      if (list.length === 0) {
-        toast.info(t("skills.noProjectSkillsFound"));
-      }
-    } catch (err) {
-      toast.error(t("common.error"), { description: String(err) });
-    } finally {
-      setLoadingProjects(false);
-    }
-  }, [t]);
 
   const updatesMap = useMemo(() => {
     const map: Record<string, SkillUpdateInfo> = {};
@@ -298,7 +168,6 @@ const UnifiedSkillsPanel = React.forwardRef<
       message: t("skills.uninstallConfirm", { name: skill.name }),
       onConfirm: async () => {
         try {
-          // 构建 skillKey 用于更新 discoverable 缓存
           const installName =
             skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
             skill.directory.toLowerCase();
@@ -446,9 +315,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       setRestoreDialogOpen(false);
       toast.success(
         t("skills.restoreFromBackup.success", { name: restored.name }),
-        {
-          closeButton: true,
-        },
+        { closeButton: true },
       );
     } catch (error) {
       toast.error(t("skills.restoreFromBackup.failed"), {
@@ -475,9 +342,7 @@ const UnifiedSkillsPanel = React.forwardRef<
             t("skills.restoreFromBackup.deleteSuccess", {
               name: backup.skill.name,
             }),
-            {
-              closeButton: true,
-            },
+            { closeButton: true },
           );
         } catch (error) {
           toast.error(t("skills.restoreFromBackup.deleteFailed"), {
@@ -495,6 +360,43 @@ const UnifiedSkillsPanel = React.forwardRef<
     openRestoreFromBackup: handleOpenRestoreFromBackup,
     checkUpdates: handleCheckUpdates,
   }));
+
+  // 扫描所有项目
+  const handleFetchProjectList = useCallback(async () => {
+    setLoadingProjects(true);
+    try {
+      const list = await skillsApi.listSkillProjects();
+      setProjectList(list);
+      if (list.length === 0) {
+        toast.info(t("skills.noProjectSkillsFound"));
+      } else {
+        toast.success(t("skills.projectSkillsDetected", { count: list.length }));
+      }
+    } catch (err) {
+      toast.error(t("common.error"), { description: String(err) });
+    } finally {
+      setLoadingProjects(false);
+    }
+  }, [t]);
+
+  // 加载指定项目的 skill（从文件系统扫）
+  const handleSelectProject = useCallback(
+    async (projectPath: string) => {
+      setCurrentProjectPath(projectPath);
+      if (projectSkillsMap[projectPath]) return; // 已经加载过了
+
+      setLoadingProjectSkills((prev) => ({ ...prev, [projectPath]: true }));
+      try {
+        const result = await skillsApi.scanUnmanaged(projectPath);
+        setProjectSkillsMap((prev) => ({ ...prev, [projectPath]: result }));
+      } catch (err) {
+        toast.error(t("common.error"), { description: String(err) });
+      } finally {
+        setLoadingProjectSkills((prev) => ({ ...prev, [projectPath]: false }));
+      }
+    },
+    [projectSkillsMap, t],
+  );
 
   return (
     <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -567,6 +469,7 @@ const UnifiedSkillsPanel = React.forwardRef<
           className="flex-1 min-h-0 overflow-hidden"
         >
           <div className="h-full overflow-y-auto overflow-x-hidden pb-24">
+            {/* 作用域切换 */}
             <div className="mb-4 mt-4 flex items-center gap-2">
               <Button
                 variant={skillScope === "global" ? "default" : "outline"}
@@ -578,18 +481,22 @@ const UnifiedSkillsPanel = React.forwardRef<
               <Button
                 variant={skillScope === "project" ? "default" : "outline"}
                 size="sm"
-                onClick={() => setSkillScope("project")}
+                onClick={() => {
+                  setSkillScope("project");
+                  if (!projectList) handleFetchProjectList();
+                }}
               >
                 {t("skills.projectSkills")}
               </Button>
             </div>
+
+            {/* 项目级：扫描按钮 */}
             {skillScope === "project" && (
-              <div className="mb-4">
-                {/* 自动扫描项目的按钮 */}
+              <>
                 <div className="flex items-center gap-2 mb-3">
                   <Button
                     type="button"
-                    variant={projectList && projectList.length > 0 ? "outline" : "default"}
+                    variant="default"
                     size="sm"
                     className="h-8 text-xs gap-1"
                     onClick={handleFetchProjectList}
@@ -602,43 +509,16 @@ const UnifiedSkillsPanel = React.forwardRef<
                     )}
                     {t("skills.scanForProjects")}
                   </Button>
-                  {projectList && projectList.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs gap-1"
-                      onClick={() => setProjectListOpen(!projectListOpen)}
-                    >
-                      {projectListOpen ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                      {t("skills.showProjects", { count: projectList.length })}
-                    </Button>
+                  {loadingProjects && (
+                    <span className="text-xs text-muted-foreground">
+                      {t("skills.loading")}
+                    </span>
                   )}
                 </div>
 
-                {/* 项目列表（可折叠） */}
-                {projectListOpen && projectList && projectList.length > 0 && (
-                  <div className="mb-4 rounded-lg border bg-muted/30 p-3 space-y-3">
-                    {projectList.map((projPath) => (
-                      <ProjectSkillGroup
-                        key={projPath}
-                        projectPath={projPath}
-                        isActive={currentProjectPath === projPath}
-                        onSelect={() => setCurrentProjectPath(projPath)}
-                        currentApp={currentApp}
-                        t={t}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                {/* 手动输入路径（备选方案） */}
+                {/* 手动输入备选 */}
                 {(!projectList || projectList.length === 0) && !loadingProjects && (
-                  <div className="flex items-center gap-2">
+                  <div className="mb-3">
                     <Input
                       placeholder={t("skills.projectPathPlaceholder")}
                       value={currentProjectPath}
@@ -647,44 +527,121 @@ const UnifiedSkillsPanel = React.forwardRef<
                     />
                   </div>
                 )}
-              </div>
+
+                {/* 项目平铺列表 */}
+                {projectList && projectList.length > 0 && (
+                  <div className="mb-4 rounded-lg border bg-muted/30 p-3 space-y-2">
+                    {projectList.map((projPath) => (
+                      <div
+                        key={projPath}
+                        className="border rounded-md bg-background"
+                      >
+                        {/* 项目名标题行 */}
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 w-full text-left text-sm font-medium hover:bg-muted/50 rounded px-2 py-1"
+                          onClick={() => handleSelectProject(projPath)}
+                        >
+                          <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="flex-1 truncate">
+                            {projPath.split("/").pop() || projPath}
+                          </span>
+                          <span className="text-xs text-muted-foreground/60 shrink-0 truncate max-w-[200px]">
+                            {projPath}
+                          </span>
+                          {currentProjectPath === projPath && (
+                            <Badge variant="default" className="text-[10px] px-1 h-4">
+                              {t("skills.selected")}
+                            </Badge>
+                          )}
+                        </button>
+
+                        {/* 该项目的 skill 列表 */}
+                        {currentProjectPath === projPath && (
+                          <div className="mt-1 space-y-1 pl-4 pb-2">
+                            {loadingProjectSkills[projPath] ? (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                {t("skills.loading")}
+                              </div>
+                            ) : projectSkillsMap[projPath]?.length === 0 ? (
+                              <div className="text-xs text-muted-foreground/60 py-2">
+                                {t("skills.noSkillsInProject")}
+                              </div>
+                            ) : (
+                              projectSkillsMap[projPath]?.map((skill) => (
+                                <div
+                                  key={skill.directory}
+                                  className="flex items-center justify-between rounded py-1 px-1 hover:bg-muted/30 text-sm"
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                    <span className="font-medium truncate text-sm">
+                                      {skill.name}
+                                    </span>
+                                    {skill.description && (
+                                      <span className="text-xs text-muted-foreground/60 truncate">
+                                        {skill.description}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 ml-2 shrink-0">
+                                    <span className="text-[10px] text-muted-foreground/40">
+                                      {skill.foundIn?.join(", ")}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-            {isLoading ? (
-              <div className="text-center py-12 text-muted-foreground">
-                {t("skills.loading")}
-              </div>
-            ) : !skills || skills.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-                  <Sparkles size={24} className="text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  {t("skills.noInstalled")}
-                </h3>
-                <p className="text-muted-foreground text-sm">
-                  {t("skills.noInstalledDescription")}
-                </p>
-              </div>
-            ) : (
-              <TooltipProvider delayDuration={300}>
-                <div className="rounded-xl border border-border-default overflow-hidden">
-                  {skills.map((skill, index) => (
-                    <InstalledSkillListItem
-                      key={skill.id}
-                      skill={skill}
-                      hasUpdate={!!updatesMap[skill.id]}
-                      isUpdating={
-                        updateSkillMutation.isPending &&
-                        updateSkillMutation.variables === skill.id
-                      }
-                      onToggleApp={handleToggleApp}
-                      onUninstall={() => handleUninstall(skill)}
-                      onUpdate={() => handleUpdateSkill(skill)}
-                      isLast={index === skills.length - 1}
-                    />
-                  ))}
-                </div>
-              </TooltipProvider>
+
+            {/* 全局 skill 列表（只在 global scope 时显示） */}
+            {skillScope === "global" && (
+              <>
+                {isLoading ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    {t("skills.loading")}
+                  </div>
+                ) : !skills || skills.length === 0 ? (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
+                      <Sparkles size={24} className="text-muted-foreground" />
+                    </div>
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      {t("skills.noInstalled")}
+                    </h3>
+                    <p className="text-muted-foreground text-sm">
+                      {t("skills.noInstalledDescription")}
+                    </p>
+                  </div>
+                ) : (
+                  <TooltipProvider delayDuration={300}>
+                    <div className="rounded-xl border border-border-default overflow-hidden">
+                      {skills.map((skill, index) => (
+                        <InstalledSkillListItem
+                          key={skill.id}
+                          skill={skill}
+                          hasUpdate={!!updatesMap[skill.id]}
+                          isUpdating={
+                            updateSkillMutation.isPending &&
+                            updateSkillMutation.variables === skill.id
+                          }
+                          onToggleApp={handleToggleApp}
+                          onUninstall={() => handleUninstall(skill)}
+                          onUpdate={() => handleUpdateSkill(skill)}
+                          isLast={index === skills.length - 1}
+                        />
+                      ))}
+                    </div>
+                  </TooltipProvider>
+                )}
+              </>
             )}
           </div>
         </TabsContent>
@@ -952,6 +909,7 @@ const RestoreSkillsDialog: React.FC<RestoreSkillsDialogProps> = ({
                         {isDeleting
                           ? t("skills.restoreFromBackup.deleting")
                           : t("skills.restoreFromBackup.delete")}
+                        </Button>
                       </Button>
                     </div>
                   </div>
