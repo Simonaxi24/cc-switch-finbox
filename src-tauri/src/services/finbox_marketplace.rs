@@ -107,7 +107,7 @@ impl FinboxMarketplaceService {
         let client = reqwest::Client::builder()
             .user_agent("CC-Switch/3.17.0")
             .timeout(std::time::Duration::from_secs(30))
-            .cookie_store(true)
+            
             .build()
             .unwrap_or_default();
         Self {

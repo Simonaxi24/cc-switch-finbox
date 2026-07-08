@@ -12,7 +12,7 @@ mod deeplink;
 mod env;
 mod failover;
 pub mod finbox_marketplace;
-mod finbox_sso;
+pub mod finbox_sso;
 mod global_proxy;
 mod hermes;
 mod import_export;

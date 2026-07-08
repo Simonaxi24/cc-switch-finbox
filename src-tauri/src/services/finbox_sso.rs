@@ -6,7 +6,6 @@
 //! which evaluates `document.cookie` in the SSO window context, saves the cookies
 //! to the FinboxMarketplaceService, and closes the window.
 
-use crate::error::AppError;
 use crate::services::finbox_marketplace::FinboxMarketplaceService;
 use log;
 use std::sync::Arc;
