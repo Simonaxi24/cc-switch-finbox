@@ -143,12 +143,15 @@ pub fn detect_project_skills(
 }
 
 /// 从应用目录导入 Skills
+/// 可选的 `project_path` 参数用于项目级 skill 导入
 #[tauri::command]
 pub fn import_skills_from_apps(
     imports: Vec<ImportSkillSelection>,
+    project_path: Option<String>,
     app_state: State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps(&app_state.db, imports).map_err(|e| e.to_string())
+    SkillService::import_from_apps(&app_state.db, imports, project_path.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 // ========== 发现功能命令 ==========

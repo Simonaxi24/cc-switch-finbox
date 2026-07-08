@@ -202,11 +202,15 @@ export const skillsApi = {
     return await invoke("list_skill_projects");
   },
 
-  /** 从应用目录导入 Skills */
+  /** 从应用目录导入 Skills（可选 project_path 用于项目级导入） */
   async importFromApps(
     imports: ImportSkillSelection[],
+    projectPath?: string,
   ): Promise<InstalledSkill[]> {
-    return await invoke("import_skills_from_apps", { imports });
+    return await invoke("import_skills_from_apps", {
+      imports,
+      projectPath: projectPath ?? null,
+    });
   },
 
   /** 发现可安装的 Skills（从仓库获取） */

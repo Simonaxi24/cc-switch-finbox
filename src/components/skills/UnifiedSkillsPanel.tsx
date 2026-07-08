@@ -9,6 +9,7 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -398,6 +399,45 @@ const UnifiedSkillsPanel = React.forwardRef<
     [projectSkillsMap, t],
   );
 
+  // 导入项目级 skill 到 CC-Switch DB
+  const handleImportProjectSkills = useCallback(
+    async (projectPath: string) => {
+      const skills = projectSkillsMap[projectPath];
+      if (!skills || skills.length === 0) return;
+
+      const imports: ImportSkillSelection[] = skills.map((skill) => ({
+        directory: skill.directory,
+        apps: {
+          claude: skill.foundIn?.includes("claude") ?? false,
+          codex: skill.foundIn?.includes("codex") ?? false,
+          gemini: skill.foundIn?.includes("gemini") ?? false,
+          opencode: skill.foundIn?.includes("opencode") ?? false,
+          openclaw: false,
+          hermes: skill.foundIn?.includes("hermes") ?? false,
+        },
+      }));
+
+      try {
+        const imported = await importMutation.mutateAsync({
+          imports,
+          projectPath,
+        });
+        // 清除缓存，重新查询
+        setProjectSkillsMap((prev) => {
+          const next = { ...prev };
+          delete next[projectPath];
+          return next;
+        });
+        toast.success(t("skills.importSuccess", { count: imported.length }), {
+          closeButton: true,
+        });
+      } catch (err) {
+        toast.error(t("common.error"), { description: String(err) });
+      }
+    },
+    [projectSkillsMap, importMutation, t],
+  );
+
   return (
     <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
       <div className="flex items-center justify-between">
@@ -558,7 +598,30 @@ const UnifiedSkillsPanel = React.forwardRef<
 
                         {/* 该项目的 skill 列表 */}
                         {currentProjectPath === projPath && (
-                          <div className="mt-1 space-y-1 pl-4 pb-2">
+                          <div className="mt-1 pl-4 pb-2">
+                            {/* 导入按钮 */}
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs text-muted-foreground">
+                                {t("skills.projectSkillsCount", {
+                                  count: projectSkillsMap[projPath]?.length ?? 0,
+                                })}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => handleImportProjectSkills(projPath)}
+                                disabled={
+                                  loadingProjectSkills[projPath] ||
+                                  !projectSkillsMap[projPath]?.length
+                                }
+                              >
+                                <Download className="h-3 w-3" />
+                                {t("skills.importToCcSwitch")}
+                              </Button>
+                            </div>
+
                             {loadingProjectSkills[projPath] ? (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
                                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -569,28 +632,30 @@ const UnifiedSkillsPanel = React.forwardRef<
                                 {t("skills.noSkillsInProject")}
                               </div>
                             ) : (
-                              projectSkillsMap[projPath]?.map((skill) => (
-                                <div
-                                  key={skill.directory}
-                                  className="flex items-center justify-between rounded py-1 px-1 hover:bg-muted/30 text-sm"
-                                >
-                                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                    <span className="font-medium truncate text-sm">
-                                      {skill.name}
-                                    </span>
-                                    {skill.description && (
-                                      <span className="text-xs text-muted-foreground/60 truncate">
-                                        {skill.description}
+                              <div className="space-y-1">
+                                {projectSkillsMap[projPath]?.map((skill) => (
+                                  <div
+                                    key={skill.directory}
+                                    className="flex items-center justify-between rounded py-1 px-1 hover:bg-muted/30 text-sm"
+                                  >
+                                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                      <span className="font-medium truncate text-sm">
+                                        {skill.name}
                                       </span>
-                                    )}
+                                      {skill.description && (
+                                        <span className="text-xs text-muted-foreground/60 truncate">
+                                          {skill.description}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 ml-2 shrink-0">
+                                      <span className="text-[10px] text-muted-foreground/40">
+                                        {skill.foundIn?.join(", ")}
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div className="flex items-center gap-1 ml-2 shrink-0">
-                                    <span className="text-[10px] text-muted-foreground/40">
-                                      {skill.foundIn?.join(", ")}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))
+                                ))}
+                              </div>
                             )}
                           </div>
                         )}
@@ -909,7 +974,6 @@ const RestoreSkillsDialog: React.FC<RestoreSkillsDialogProps> = ({
                         {isDeleting
                           ? t("skills.restoreFromBackup.deleting")
                           : t("skills.restoreFromBackup.delete")}
-                        </Button>
                       </Button>
                     </div>
                   </div>

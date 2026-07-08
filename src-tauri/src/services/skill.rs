@@ -1502,6 +1502,7 @@ impl SkillService {
     pub fn import_from_apps(
         db: &Arc<Database>,
         imports: Vec<ImportSkillSelection>,
+        project_path: Option<&str>,
     ) -> Result<Vec<InstalledSkill>> {
         let ssot_dir = Self::get_ssot_dir()?;
         let agents_lock = parse_agents_lock();
@@ -1525,6 +1526,14 @@ impl SkillService {
             search_sources.push((agents_dir, "agents".to_string()));
         }
         search_sources.push((ssot_dir.clone(), "cc-switch".to_string()));
+
+        // 项目级 skill 搜索目录
+        if let Some(pp) = project_path {
+            let project_skills = PathBuf::from(pp).join(".claude").join("skills");
+            if project_skills.exists() {
+                search_sources.push((project_skills, "project".to_string()));
+            }
+        }
 
         for selection in imports {
             let dir_name = selection.directory;

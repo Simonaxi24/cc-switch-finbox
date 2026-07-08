@@ -217,12 +217,14 @@ export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
 export function useImportSkillsFromApps() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (imports: ImportSkillSelection[]) =>
-      skillsApi.importFromApps(imports),
-    onSuccess: (importedSkills) => {
-      // 直接更新 installed 缓存
+    mutationFn: (vars: { imports: ImportSkillSelection[]; projectPath?: string }) =>
+      skillsApi.importFromApps(vars.imports, vars.projectPath),
+    onSuccess: (importedSkills, vars) => {
+      // 更新 installed 缓存（按 scope 分别更新）
+      const scope = vars.projectPath ? "project" : "global";
+      const cachePath = vars.projectPath ?? null;
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed", "global", null],
+        ["skills", "installed", scope, cachePath],
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
       // 刷新 unmanaged 列表（已被导入的应该移除）

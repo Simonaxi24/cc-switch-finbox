@@ -2159,6 +2159,8 @@
     "selected": "已选",
     "noSkillsInProject": "此项目中未找到 Skill",
     "enterProjectPathFirst": "请先输入项目路径",
+    "projectSkillsCount": "{{count}} 个 Skill",
+    "importToCcSwitch": "导入到 CC-Switch",
     "installedTab": "已安装",
     "finboxTab": "Finbox",
     "searchFinbox": "搜索 Finbox Skill...",
