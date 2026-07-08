@@ -69,3 +69,26 @@ pub async fn refresh_finbox_cache(
         .map_err(|e| e.to_string())?;
     Ok(true)
 }
+
+#[tauri::command]
+pub fn set_finbox_sso_cookie(
+    cookie: String,
+    service: State<'_, FinboxServiceState>,
+) -> Result<bool, String> {
+    service.0.set_sso_cookie(cookie);
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn get_finbox_sso_cookie(
+    service: State<'_, FinboxServiceState>,
+) -> Result<Option<String>, String> {
+    Ok(service.0.get_sso_cookie())
+}
+
+#[tauri::command]
+pub fn has_finbox_sso_cookie(
+    service: State<'_, FinboxServiceState>,
+) -> Result<bool, String> {
+    Ok(service.0.has_sso_cookie())
+}

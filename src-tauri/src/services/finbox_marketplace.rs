@@ -3,14 +3,15 @@ use crate::database::Database;
 use crate::error::AppError;
 use crate::services::skill::{DiscoverableSkill, SkillService};
 use anyhow::{anyhow, Context, Result};
-use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::Arc;
 
-const FINBOX_URL: &str = "https://finbox.jd.com/coverage";
+const FINBOX_BASE_URL: &str = "https://finbox.jd.com";
 const CACHE_TTL_SECONDS: i64 = 3600;
+
+// ── API response types ──
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,8 +34,66 @@ pub struct FinboxSkillDetail {
     pub readme: Option<String>,
 }
 
+/// Finbox `/finbox/tools` API response item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinboxTool {
+    id: i64,
+    name: String,
+    description: Option<String>,
+    owner: Option<String>,
+    // attachments are in versions, not directly on the tool
+}
+
+/// Finbox `/finbox/tools/{id}/versions` API response item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinboxToolVersion {
+    id: i64,
+    title: Option<String>,
+    #[serde(default)]
+    attachments: Vec<FinboxAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinboxAttachment {
+    id: i64,
+    file_name: Option<String>,
+    object_key: Option<String>,
+    object_url: Option<String>,
+}
+
+/// Finbox `/finbox/coverage/assets` API response item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FinboxCoverageAsset {
+    id: i64,
+    asset_type: Option<String>,
+    asset_ref: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    status: Option<String>,
+}
+
+/// Generic Finbox API wrapper: `{"success": true, "data": ...}`
+#[derive(Debug, Deserialize)]
+struct FinboxApiResponse<T> {
+    success: bool,
+    #[serde(default)]
+    data: Option<T>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
+}
+
+// ── Service ──
+
 pub struct FinboxMarketplaceService {
     client: reqwest::Client,
+    /// JD SSO cookie（用户配置后使用）
+    sso_cookie: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for FinboxMarketplaceService {
@@ -48,10 +107,33 @@ impl FinboxMarketplaceService {
         let client = reqwest::Client::builder()
             .user_agent("CC-Switch/3.17.0")
             .timeout(std::time::Duration::from_secs(30))
+            .cookie_store(true)
             .build()
             .unwrap_or_default();
-        Self { client }
+        Self {
+            client,
+            sso_cookie: std::sync::Mutex::new(None),
+        }
     }
+
+    /// Set the JD SSO cookie for authenticated API requests.
+    pub fn set_sso_cookie(&self, cookie: String) {
+        if let Ok(mut guard) = self.sso_cookie.lock() {
+            *guard = Some(cookie);
+        }
+    }
+
+    /// Get the current SSO cookie (if configured).
+    pub fn get_sso_cookie(&self) -> Option<String> {
+        self.sso_cookie.lock().ok().and_then(|g| g.clone())
+    }
+
+    /// Check if SSO cookie is configured.
+    pub fn has_sso_cookie(&self) -> bool {
+        self.sso_cookie.lock().map(|g| g.is_some()).unwrap_or(false)
+    }
+
+    // ── Public API ──
 
     /// Search Finbox marketplace skills, using the local SQLite cache first.
     pub async fn search_skills(
@@ -79,12 +161,12 @@ impl FinboxMarketplaceService {
                     || skill
                         .description
                         .as_deref()
-                        .map(|description| description.to_lowercase().contains(&query))
+                        .map(|d| d.to_lowercase().contains(&query))
                         .unwrap_or(false)
                     || skill
                         .category
                         .as_deref()
-                        .map(|category| category.to_lowercase().contains(&query))
+                        .map(|c| c.to_lowercase().contains(&query))
                         .unwrap_or(false)
             })
             .collect())
@@ -108,10 +190,6 @@ impl FinboxMarketplaceService {
     }
 
     /// Install a Finbox skill into CC Switch.
-    ///
-    /// Archive URLs are downloaded and installed via `SkillService::install_from_zip`.
-    /// Other URLs are treated as GitHub repository URLs and installed through the existing
-    /// `SkillService::install` flow.
     pub async fn install_skill(
         &self,
         db: &Arc<Database>,
@@ -142,95 +220,160 @@ impl FinboxMarketplaceService {
             .await
     }
 
-    /// Force-refresh the Finbox marketplace cache from finbox.jd.com/coverage.
+    /// Force-refresh the Finbox marketplace cache via API.
     pub async fn refresh_cache(&self, db: &Arc<Database>) -> Result<()> {
-        let html = self.fetch_page().await?;
-        let skills = self.parse_skills(&html)?;
-        self.save_to_cache(db, &skills, &html)?;
+        let skills = self.fetch_skills_from_api().await?;
+        self.save_to_cache(db, &skills)?;
         Ok(())
     }
 
-    async fn fetch_page(&self) -> Result<String> {
-        let response = self
-            .client
-            .get(FINBOX_URL)
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(response.text().await?)
+    // ── API calls ──
+
+    /// Build an authenticated request builder with SSO cookie.
+    fn authed_request(&self, method: reqwest::Method, url: &str) -> Result<reqwest::RequestBuilder> {
+        let cookie = self.sso_cookie.lock()
+            .map_err(|e| anyhow!("Mutex lock failed: {}", e))?
+            .clone()
+            .ok_or_else(|| anyhow!("未配置京东 SSO Cookie，请在设置中配置后再使用 Finbox 商场"))?;
+
+        Ok(self.client
+            .request(method, url)
+            .header("Cookie", &cookie)
+            .header("Cache-Control", "no-store, no-cache, must-revalidate")
+            .header("Pragma", "no-cache"))
     }
 
-    fn parse_skills(&self, html: &str) -> Result<Vec<FinboxSkill>> {
-        let document = Html::parse_document(html);
-
-        // PLACEHOLDER SELECTORS: finbox.jd.com/coverage's actual DOM structure is unknown.
-        // These generic selectors are intentionally broad and MUST be updated once the real
-        // page markup is inspected.
-        let item_selector = Self::selector(
-            "div.skill-item, tr.skill-row, li.skill-entry, div[class*='skill'], div[class*='coverage']",
-        )?;
-        let name_selector = Self::selector("h3, h2, .name, .title, a")?;
-        let description_selector = Self::selector("p, .desc, .description, .summary")?;
-        let category_selector = Self::selector(".category, .tag, [data-category]")?;
-        let link_selector = Self::selector("a[href]")?;
-
-        let mut skills = Vec::new();
-        for element in document.select(&item_selector) {
-            let name = element
-                .select(&name_selector)
-                .next()
-                .map(Self::element_text)
-                .unwrap_or_default();
-
-            if name.is_empty() {
-                continue;
+    /// Fetch skills from the Finbox API.
+    ///
+    /// Tries two endpoints in order:
+    /// 1. `/finbox/tools` — the tool/skill registry
+    /// 2. `/finbox/coverage/assets` — coverage assets (fallback)
+    async fn fetch_skills_from_api(&self) -> Result<Vec<FinboxSkill>> {
+        // Try /finbox/tools first
+        match self.fetch_tools().await {
+            Ok(skills) if !skills.is_empty() => return Ok(skills),
+            Ok(_) => { /* empty result, try fallback */ }
+            Err(e) => {
+                log::warn!("Finbox /finbox/tools failed: {}, trying fallback", e);
             }
+        }
 
-            let description = element
-                .select(&description_selector)
-                .next()
-                .map(Self::element_text)
-                .filter(|value| !value.is_empty());
+        // Fallback: /finbox/coverage/assets
+        match self.fetch_coverage_assets().await {
+            Ok(skills) if !skills.is_empty() => return Ok(skills),
+            Ok(_) => Err(anyhow!("Finbox 返回了空的 skill 列表")),
+            Err(e) => Err(anyhow!("无法从 Finbox 获取 skill 数据: {}", e)),
+        }
+    }
 
-            let category = element
-                .select(&category_selector)
-                .next()
-                .map(|category| {
-                    category
-                        .value()
-                        .attr("data-category")
-                        .map(str::to_string)
-                        .unwrap_or_else(|| Self::element_text(category))
-                })
-                .filter(|value| !value.is_empty());
+    /// Fetch from /finbox/tools endpoint.
+    async fn fetch_tools(&self) -> Result<Vec<FinboxSkill>> {
+        let url = format!("{}/finbox/tools", FINBOX_BASE_URL);
+        let resp = self.authed_request(reqwest::Method::GET, &url)?
+            .send()
+            .await?;
 
-            let download_url = element
-                .select(&link_selector)
-                .find_map(|link| link.value().attr("href"))
-                .map(Self::normalize_finbox_url);
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(anyhow!("SSO 登录已过期，请重新配置 Cookie"));
+        }
 
-            let key = element
-                .value()
-                .attr("data-key")
-                .or_else(|| element.value().attr("data-id"))
-                .map(str::to_string)
-                .or_else(|| download_url.as_deref().map(Self::key_from_url))
-                .unwrap_or_else(|| Self::slugify(&name));
+        let api_resp: FinboxApiResponse<Vec<FinboxTool>> = resp.json().await
+            .map_err(|e| anyhow!("解析 Finbox API 响应失败: {}", e))?;
+
+        if !api_resp.success {
+            let msg = api_resp.error.as_deref().or(api_resp.detail.as_deref()).unwrap_or("未知错误");
+            return Err(anyhow!("Finbox API 错误: {}", msg));
+        }
+
+        let tools = api_resp.data.unwrap_or_default();
+        let mut skills = Vec::with_capacity(tools.len());
+
+        for tool in tools {
+            // Try to get download URL from the latest version
+            let download_url = self.fetch_tool_download_url(tool.id).await.ok();
 
             skills.push(FinboxSkill {
-                key,
-                name,
-                description,
+                key: format!("finbox:tool:{}", tool.id),
+                name: tool.name,
+                description: tool.description,
                 download_url,
-                category,
+                category: tool.owner,
             });
         }
 
         Ok(skills)
     }
 
-    fn save_to_cache(&self, db: &Arc<Database>, skills: &[FinboxSkill], html: &str) -> Result<()> {
-        let html_hash = format!("{:x}", Sha256::digest(html.as_bytes()));
+    /// Get the download URL for a tool's latest version.
+    async fn fetch_tool_download_url(&self, tool_id: i64) -> Result<String> {
+        let url = format!("{}/finbox/tools/{}/versions", FINBOX_BASE_URL, tool_id);
+        let resp = self.authed_request(reqwest::Method::GET, &url)?
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            return Err(anyhow!("获取工具版本失败: HTTP {}", resp.status()));
+        }
+
+        let api_resp: FinboxApiResponse<Vec<FinboxToolVersion>> = resp.json().await
+            .map_err(|e| anyhow!("解析版本响应失败: {}", e))?;
+
+        let versions = api_resp.data.unwrap_or_default();
+        let latest = versions.into_iter().next();
+
+        if let Some(version) = latest {
+            // Look for an attachment with a downloadable URL
+            if let Some(attachment) = version.attachments.into_iter().next() {
+                if let Some(obj_url) = attachment.object_url {
+                    return Ok(obj_url);
+                }
+                if let Some(obj_key) = attachment.object_key {
+                    return Ok(format!("{}/finbox/uploads/tool-attachments/{}/download", FINBOX_BASE_URL, obj_key));
+                }
+            }
+        }
+
+        Err(anyhow!("未找到可下载的版本"))
+    }
+
+    /// Fetch from /finbox/coverage/assets endpoint (fallback).
+    async fn fetch_coverage_assets(&self) -> Result<Vec<FinboxSkill>> {
+        let url = format!("{}/finbox/coverage/assets", FINBOX_BASE_URL);
+        let resp = self.authed_request(reqwest::Method::GET, &url)?
+            .send()
+            .await?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(anyhow!("SSO 登录已过期，请重新配置 Cookie"));
+        }
+
+        let api_resp: FinboxApiResponse<Vec<FinboxCoverageAsset>> = resp.json().await
+            .map_err(|e| anyhow!("解析 Finbox Coverage Assets 响应失败: {}", e))?;
+
+        if !api_resp.success {
+            let msg = api_resp.error.as_deref().or(api_resp.detail.as_deref()).unwrap_or("未知错误");
+            return Err(anyhow!("Finbox Coverage API 错误: {}", msg));
+        }
+
+        let assets = api_resp.data.unwrap_or_default();
+
+        Ok(assets
+            .into_iter()
+            .filter(|a| a.status.as_deref() == Some("active"))
+            .filter(|a| a.asset_type.as_deref() == Some("tool"))
+            .map(|asset| FinboxSkill {
+                key: format!("finbox:asset:{}", asset.id),
+                name: asset.name.unwrap_or_default(),
+                description: asset.description,
+                download_url: None,
+                category: asset.asset_ref,
+            })
+            .collect())
+    }
+
+    // ── Cache ──
+
+    fn save_to_cache(&self, db: &Arc<Database>, skills: &[FinboxSkill]) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
         let expires_at = now + CACHE_TTL_SECONDS;
 
@@ -245,6 +388,7 @@ impl FinboxMarketplaceService {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         for skill in skills {
+            let html_hash = format!("api-{}", now);
             tx.execute(
                 "INSERT OR REPLACE INTO finbox_skill_cache \
                  (key, name, description, download_url, category, raw_html_hash, cached_at, expires_at) \
@@ -332,6 +476,8 @@ impl FinboxMarketplaceService {
         Ok(skill)
     }
 
+    // ── Install helpers ──
+
     async fn install_archive(
         &self,
         db: &Arc<Database>,
@@ -379,6 +525,8 @@ impl FinboxMarketplaceService {
         })
     }
 
+    // ── URL helpers ──
+
     fn parse_github_skill_url(url: &str) -> Option<(String, String, String, String)> {
         let parsed = url::Url::parse(url).ok()?;
         if parsed.host_str()? != "github.com" {
@@ -408,6 +556,11 @@ impl FinboxMarketplaceService {
         Some((owner, repo, "main".to_string(), String::new()))
     }
 
+    fn is_archive_url(url: &str) -> bool {
+        let lower = url.to_lowercase();
+        lower.ends_with(".zip") || lower.ends_with(".tar.gz") || lower.ends_with(".tgz")
+    }
+
     fn to_detail(skill: FinboxSkill) -> FinboxSkillDetail {
         FinboxSkillDetail {
             key: skill.key,
@@ -417,36 +570,6 @@ impl FinboxMarketplaceService {
             category: skill.category,
             readme: None,
         }
-    }
-
-    fn is_archive_url(url: &str) -> bool {
-        let lower = url.to_lowercase();
-        lower.ends_with(".zip") || lower.ends_with(".tar.gz") || lower.ends_with(".tgz")
-    }
-
-    fn normalize_finbox_url(url: &str) -> String {
-        if url.starts_with("http://") || url.starts_with("https://") {
-            return url.to_string();
-        }
-
-        if url.starts_with("//") {
-            return format!("https:{url}");
-        }
-
-        if url.starts_with('/') {
-            return format!("https://finbox.jd.com{url}");
-        }
-
-        url.to_string()
-    }
-
-    fn key_from_url(url: &str) -> String {
-        url.trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .map(Self::slugify)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| Self::slugify(url))
     }
 
     fn slugify(value: &str) -> String {
@@ -470,13 +593,5 @@ impl FinboxMarketplaceService {
         } else {
             slug
         }
-    }
-
-    fn selector(css: &str) -> Result<Selector> {
-        Selector::parse(css).map_err(|e| anyhow!("Invalid Finbox parser selector '{}': {:?}", css, e))
-    }
-
-    fn element_text(element: scraper::ElementRef<'_>) -> String {
-        element.text().collect::<Vec<_>>().join(" ").trim().to_string()
     }
 }

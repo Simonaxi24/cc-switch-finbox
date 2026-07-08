@@ -1340,6 +1340,9 @@ pub fn run() {
             commands::finbox_marketplace::get_finbox_skill_detail,
             commands::finbox_marketplace::install_from_finbox,
             commands::finbox_marketplace::refresh_finbox_cache,
+            commands::finbox_marketplace::set_finbox_sso_cookie,
+            commands::finbox_marketplace::get_finbox_sso_cookie,
+            commands::finbox_marketplace::has_finbox_sso_cookie,
             // Skill management (legacy API compatibility)
             commands::get_skills,
             commands::get_skills_for_app,

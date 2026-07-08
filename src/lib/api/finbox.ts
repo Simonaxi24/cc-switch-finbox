@@ -36,4 +36,16 @@ export const finboxApi = {
   async refreshCache(): Promise<boolean> {
     return await invoke("refresh_finbox_cache");
   },
+
+  async setSsoCookie(cookie: string): Promise<boolean> {
+    return await invoke("set_finbox_sso_cookie", { cookie });
+  },
+
+  async getSsoCookie(): Promise<string | null> {
+    return await invoke("get_finbox_sso_cookie");
+  },
+
+  async hasSsoCookie(): Promise<boolean> {
+    return await invoke("has_finbox_sso_cookie");
+  },
 };

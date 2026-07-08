@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, RefreshCw, Download, ExternalLink } from "lucide-react";
+import { Search, RefreshCw, Download, ExternalLink, Key, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import {
   useInstallFromFinbox,
   useRefreshFinboxCache,
 } from "@/hooks/useFinbox";
+import { finboxApi } from "@/lib/api";
 import type { AppId } from "@/lib/api/types";
 
 interface FinboxMarketplacePanelProps {
@@ -21,6 +22,9 @@ export function FinboxMarketplacePanel({
 }: FinboxMarketplacePanelProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
+  const [cookieInput, setCookieInput] = useState("");
+  const [showCookieInput, setShowCookieInput] = useState(false);
+  const [hasCookie, setHasCookie] = useState(false);
   const {
     data: skills,
     isLoading,
@@ -28,6 +32,11 @@ export function FinboxMarketplacePanel({
   } = useFinboxSkills(searchQuery || undefined);
   const installMutation = useInstallFromFinbox();
   const refreshMutation = useRefreshFinboxCache();
+
+  // 检查 cookie 状态（首次加载时）
+  useState(() => {
+    finboxApi.hasSsoCookie().then(setHasCookie);
+  });
 
   const handleInstall = (key: string) => {
     installMutation.mutate(
@@ -48,6 +57,29 @@ export function FinboxMarketplacePanel({
     });
   };
 
+  const handleSetCookie = async () => {
+    if (!cookieInput.trim()) return;
+    try {
+      await finboxApi.setSsoCookie(cookieInput.trim());
+      setHasCookie(true);
+      setShowCookieInput(false);
+      setCookieInput("");
+      toast.success(t("skills.finboxCookieSet"));
+    } catch (err) {
+      toast.error(`${t("skills.finboxCookieFailed")}: ${err}`);
+    }
+  };
+
+  const handleClearCookie = async () => {
+    try {
+      await finboxApi.setSsoCookie("");
+      setHasCookie(false);
+      toast.info(t("skills.finboxCookieCleared"));
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
@@ -62,6 +94,41 @@ export function FinboxMarketplacePanel({
 
   return (
     <div className="flex flex-col gap-4">
+      {/* SSO Cookie 配置栏 */}
+      <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 bg-amber-50/30 px-3 py-2 dark:bg-amber-950/20">
+        <Key className="h-4 w-4 shrink-0 text-amber-600" />
+        <span className="flex-1 text-xs text-muted-foreground">
+          {hasCookie
+            ? t("skills.finboxCookieConfigured")
+            : t("skills.finboxCookieNeeded")}
+        </span>
+        {showCookieInput ? (
+          <div className="flex items-center gap-1">
+            <Input
+              value={cookieInput}
+              onChange={(e) => setCookieInput(e.target.value)}
+              placeholder="sso_session_ticket=xxx; ..."
+              className="h-7 w-48 text-xs"
+            />
+            <Button size="sm" variant="default" className="h-7 text-xs" onClick={handleSetCookie}>
+              {t("skills.save")}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-7 w-7 px-0" onClick={() => setShowCookieInput(false)}>
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            variant={hasCookie ? "outline" : "default"}
+            className="h-7 text-xs"
+            onClick={() => hasCookie ? handleClearCookie() : setShowCookieInput(true)}
+          >
+            {hasCookie ? t("skills.finboxClearCookie") : t("skills.finboxSetCookie")}
+          </Button>
+        )}
+      </div>
+
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
