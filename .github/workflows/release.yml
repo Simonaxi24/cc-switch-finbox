@@ -1,0 +1,243 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v3.17.0)'
+        required: false
+        default: 'v3.17.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+          - os: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS targets
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            curl \
+            wget \
+            file \
+            patchelf \
+            libssl-dev \
+            rpm \
+            elfutils \
+            xdg-utils \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev \
+            || sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
+          sudo apt-get install -y --no-install-recommends libsoup-3.0-dev \
+            || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.12.3
+          run_install: false
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri App (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          echo "=== Building macOS universal binary ==="
+          pnpm tauri build --target universal-apple-darwin
+          echo "✅ macOS build succeeded"
+
+      - name: Build Tauri App (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm tauri build
+
+      - name: Prepare macOS Assets
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p release-assets
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Locate bundle artifacts
+          TAR_GZ=""; APP_PATH=""
+          for path in \
+            "src-tauri/target/universal-apple-darwin/release/bundle/macos" \
+            "src-tauri/target/aarch64-apple-darwin/release/bundle/macos" \
+            "src-tauri/target/x86_64-apple-darwin/release/bundle/macos" \
+            "src-tauri/target/release/bundle/macos"; do
+            if [ -d "$path" ]; then
+              [ -z "$TAR_GZ" ]   && TAR_GZ=$(find "$path" -maxdepth 1 -name "*.tar.gz" -type f | head -1 || true)
+              [ -z "$APP_PATH" ] && APP_PATH=$(find "$path" -maxdepth 1 -name "*.app" -type d | head -1 || true)
+            fi
+          done
+
+          if [ -z "$TAR_GZ" ] || [ -z "$APP_PATH" ]; then
+            echo "❌ No macOS bundle artifacts found" >&2
+            exit 1
+          fi
+
+          # Prepare .tar.gz for updater
+          NEW_TAR_GZ="CC-Switch-${VERSION}-macOS.tar.gz"
+          cp "$TAR_GZ" "release-assets/$NEW_TAR_GZ"
+          [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/$NEW_TAR_GZ.sig" || true
+
+          # Create .zip
+          NEW_ZIP="CC-Switch-${VERSION}-macOS.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "release-assets/$NEW_ZIP"
+
+          # Create .dmg from .app
+          NEW_DMG="CC-Switch-${VERSION}-macOS.dmg"
+          DMG_STAGE_DIR="$RUNNER_TEMP/dmg-stage"
+          rm -rf "$DMG_STAGE_DIR"
+          mkdir -p "$DMG_STAGE_DIR"
+          ditto "$APP_PATH" "$DMG_STAGE_DIR/CC Switch.app"
+
+          # Use hdiutil to create simple DMG (no code signing)
+          hdiutil create -volname "CC Switch" -srcfolder "$DMG_STAGE_DIR" -ov -format UDZO "release-assets/$NEW_DMG"
+          rm -rf "$DMG_STAGE_DIR"
+          echo "✅ macOS DMG created: $NEW_DMG"
+
+      - name: Prepare Windows Assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+
+          # Find MSI installer
+          $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $msi) {
+            $dest = "CC-Switch-${VERSION}-Windows-x86_64.msi"
+            Copy-Item $msi.FullName (Join-Path release-assets $dest)
+            Write-Host "MSI copied: $dest"
+          } else {
+            Write-Warning "No MSI installer found"
+          }
+
+          # Create portable zip
+          $exe = Get-ChildItem -Path 'src-tauri/target/release' -Filter 'cc-switch.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $exe) {
+            $portableDir = 'release-assets/CC-Switch-Portable'
+            New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+            Copy-Item $exe.FullName $portableDir
+            '@("portable=true")' | Set-Content -Path (Join-Path $portableDir 'portable.ini') -Encoding UTF8
+            $portableZip = "release-assets/CC-Switch-${VERSION}-Windows-x86_64-Portable.zip"
+            Compress-Archive -Path "$portableDir/*" -DestinationPath (Join-Path release-assets $portableZip) -Force
+            Remove-Item -Recurse -Force $portableDir
+            Write-Host "Portable zip created: $portableZip"
+          }
+
+      - name: List prepared assets
+        shell: bash
+        run: |
+          ls -la release-assets || true
+
+      - name: Upload release artifacts to workflow
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets-${{ runner.os }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-22.04
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download built release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List downloaded release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la release-assets
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: CC Switch ${{ github.ref_name }}
+          prerelease: false
+          body: |
+            ## CC Switch Finbox ${{ github.ref_name }}
+
+            ### 新增功能
+
+            - **Finbox Skill 商场**: 从 finbox.jd.com/coverage 浏览和安装 Skill
+            - **全局/项目级 Skill 管理**: 一键安装、更新、卸载 Skill
+            - **Joybuilder 供应商**: 新增供应商预设
+            - **内嵌 WebView SSO 登录**: 自动获取 Finbox 认证 Cookie
+
+            ### 下载
+
+            - **macOS**: `CC-Switch-${{ github.ref_name }}-macOS.dmg` 或 `.zip`
+            - **Windows**: `CC-Switch-${{ github.ref_name }}-Windows-x86_64.msi` 或 Portable `.zip`
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
