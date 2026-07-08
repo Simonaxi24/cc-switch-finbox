@@ -1423,8 +1423,12 @@ impl SkillService {
 
     /// 扫描未管理的 Skills
     ///
-    /// 扫描各应用目录，找出未被 CC Switch 管理的 Skills
-    pub fn scan_unmanaged(db: &Arc<Database>) -> Result<Vec<UnmanagedSkill>> {
+    /// 扫描各应用目录，找出未被 CC Switch 管理的 Skills。
+    /// 如果提供了 `project_path`，也扫描项目级的 `.claude/skills/` 目录。
+    pub fn scan_unmanaged(
+        db: &Arc<Database>,
+        project_path: Option<&str>,
+    ) -> Result<Vec<UnmanagedSkill>> {
         let managed_skills = db.get_all_installed_skills()?;
         let managed_dirs: HashSet<String> = managed_skills
             .values()
@@ -1443,6 +1447,14 @@ impl SkillService {
         }
         if let Ok(ssot_dir) = Self::get_ssot_dir() {
             scan_sources.push((ssot_dir, "cc-switch".to_string()));
+        }
+
+        // 项目级 skill：扫描 project_path/.claude/skills/ 目录
+        if let Some(pp) = project_path {
+            let project_skills_dir = std::path::PathBuf::from(pp).join(".claude").join("skills");
+            if project_skills_dir.exists() {
+                scan_sources.push((project_skills_dir, "project".to_string()));
+            }
         }
 
         let mut unmanaged: HashMap<String, UnmanagedSkill> = HashMap::new();

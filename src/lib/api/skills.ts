@@ -191,8 +191,15 @@ export const skillsApi = {
   },
 
   /** 扫描未管理的 Skills */
-  async scanUnmanaged(): Promise<UnmanagedSkill[]> {
-    return await invoke("scan_unmanaged_skills");
+  async scanUnmanaged(projectPath?: string): Promise<UnmanagedSkill[]> {
+    return await invoke("scan_unmanaged_skills", {
+      projectPath: projectPath ?? null,
+    });
+  },
+
+  /** 自动检测当前项目的 project-level skills */
+  async detectProjectSkills(): Promise<UnmanagedSkill[]> {
+    return await invoke("detect_project_skills");
   },
 
   /** 从应用目录导入 Skills */

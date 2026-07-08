@@ -120,12 +120,26 @@ pub fn toggle_skill_app(
     Ok(true)
 }
 
-/// 扫描未管理的 Skills
+/// 扫描未管理的 Skills（全局 + 可选的项目级）
 #[tauri::command]
 pub fn scan_unmanaged_skills(
     app_state: State<'_, AppState>,
+    project_path: Option<String>,
 ) -> Result<Vec<UnmanagedSkill>, String> {
-    SkillService::scan_unmanaged(&app_state.db).map_err(|e| e.to_string())
+    SkillService::scan_unmanaged(&app_state.db, project_path.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// 自动检测当前目录下的项目级 skill 列表
+#[tauri::command]
+pub fn detect_project_skills(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<UnmanagedSkill>, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("无法获取当前工作目录: {}", e))?;
+    let project_path = cwd.display().to_string();
+    SkillService::scan_unmanaged(&app_state.db, Some(&project_path))
+        .map_err(|e| e.to_string())
 }
 
 /// 从应用目录导入 Skills

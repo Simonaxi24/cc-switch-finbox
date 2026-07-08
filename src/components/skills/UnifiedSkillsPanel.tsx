@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Sparkles, ExternalLink, RefreshCw, Loader2 } from "lucide-react";
+import { Sparkles, ExternalLink, RefreshCw, Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -438,12 +438,34 @@ const UnifiedSkillsPanel = React.forwardRef<
               </Button>
             </div>
             {skillScope === "project" && (
-              <div className="mb-4">
+              <div className="mb-4 flex items-center gap-2">
                 <Input
                   placeholder={t("skills.projectPathPlaceholder")}
                   value={currentProjectPath}
                   onChange={(e) => setCurrentProjectPath(e.target.value)}
+                  className="flex-1"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1 whitespace-nowrap"
+                  onClick={async () => {
+                    try {
+                      const result = await skillsApi.detectProjectSkills();
+                      if (result.length > 0) {
+                        toast.success(t("skills.projectSkillsDetected", { count: result.length }));
+                      } else {
+                        toast.info(t("skills.noProjectSkillsFound"));
+                      }
+                    } catch (err) {
+                      toast.error(t("common.error"), { description: String(err) });
+                    }
+                  }}
+                >
+                  <Search className="h-3 w-3" />
+                  {t("skills.autoDetect")}
+                </Button>
               </div>
             )}
             {isLoading ? (
