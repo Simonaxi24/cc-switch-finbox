@@ -371,3 +371,41 @@ pub fn install_skills_from_zip(
 
     SkillService::install_from_zip(&app_state.db, path, &app_type).map_err(|e| e.to_string())
 }
+
+/// 扫描 Home 目录下所有含有 .claude/skills/ 的项目路径
+#[tauri::command]
+pub fn list_skill_projects(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| "无法获取 Home 目录".to_string())?;
+
+    // 扫描 Home 目录下所有子目录，查找 .claude/skills/
+    let mut projects = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&home) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || path.file_name().map_or(false, |n| n.to_string_lossy().starts_with('.')) {
+                continue;
+            }
+            if path.join(".claude").join("skills").exists() {
+                projects.push(path.display().to_string());
+            }
+            // 也扫描子目录（最多两层）
+            if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                for sub_entry in sub_entries.flatten() {
+                    let sub_path = sub_entry.path();
+                    if !sub_path.is_dir() || sub_path.file_name().map_or(false, |n| n.to_string_lossy().starts_with('.')) {
+                        continue;
+                    }
+                    if sub_path.join(".claude").join("skills").exists() {
+                        projects.push(sub_path.display().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    projects.sort();
+    Ok(projects)
+}

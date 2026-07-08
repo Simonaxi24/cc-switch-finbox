@@ -197,9 +197,9 @@ export const skillsApi = {
     });
   },
 
-  /** 自动检测当前项目的 project-level skills */
-  async detectProjectSkills(): Promise<UnmanagedSkill[]> {
-    return await invoke("detect_project_skills");
+  /** 列出 Home 目录下所有含有 .claude/skills/ 的项目路径 */
+  async listSkillProjects(): Promise<string[]> {
+    return await invoke("list_skill_projects");
   },
 
   /** 从应用目录导入 Skills */
