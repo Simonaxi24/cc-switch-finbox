@@ -5,6 +5,7 @@ pub mod config;
 pub mod env_checker;
 pub mod env_manager;
 pub mod finbox_marketplace;
+pub mod finbox_sso;
 pub mod mcp;
 pub mod model_fetch;
 pub mod omo;

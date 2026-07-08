@@ -1343,6 +1343,8 @@ pub fn run() {
             commands::finbox_marketplace::set_finbox_sso_cookie,
             commands::finbox_marketplace::get_finbox_sso_cookie,
             commands::finbox_marketplace::has_finbox_sso_cookie,
+            commands::finbox_sso::open_finbox_sso_window,
+            commands::finbox_sso::close_finbox_sso_window,
             // Skill management (legacy API compatibility)
             commands::get_skills,
             commands::get_skills_for_app,

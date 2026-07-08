@@ -48,4 +48,12 @@ export const finboxApi = {
   async hasSsoCookie(): Promise<boolean> {
     return await invoke("has_finbox_sso_cookie");
   },
+
+  async openSsoWindow(): Promise<boolean> {
+    return await invoke("open_finbox_sso_window");
+  },
+
+  async closeSsoWindow(): Promise<boolean> {
+    return await invoke("close_finbox_sso_window");
+  },
 };

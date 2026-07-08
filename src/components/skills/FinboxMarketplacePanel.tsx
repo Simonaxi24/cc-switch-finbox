@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, RefreshCw, Download, ExternalLink, Key, X } from "lucide-react";
+import { Search, RefreshCw, Download, ExternalLink, LogIn, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,9 +22,9 @@ export function FinboxMarketplacePanel({
 }: FinboxMarketplacePanelProps) {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [cookieInput, setCookieInput] = useState("");
-  const [showCookieInput, setShowCookieInput] = useState(false);
   const [hasCookie, setHasCookie] = useState(false);
+  const [showCookieInput, setShowCookieInput] = useState(false);
+  const [cookieInput, setCookieInput] = useState("");
   const {
     data: skills,
     isLoading,
@@ -33,7 +33,7 @@ export function FinboxMarketplacePanel({
   const installMutation = useInstallFromFinbox();
   const refreshMutation = useRefreshFinboxCache();
 
-  // 检查 cookie 状态（首次加载时）
+  // Check cookie status on mount
   useState(() => {
     finboxApi.hasSsoCookie().then(setHasCookie);
   });
@@ -55,6 +55,15 @@ export function FinboxMarketplacePanel({
       onError: (err) =>
         toast.error(`${t("skills.cacheRefreshFailed")}: ${err.message}`),
     });
+  };
+
+  const handleOpenSSOLogin = async () => {
+    try {
+      await finboxApi.openSsoWindow();
+      toast.success(t("skills.finboxSSOWindowOpened"));
+    } catch (err) {
+      toast.error(`${t("skills.finboxSSOLoginFailed")}: ${err}`);
+    }
   };
 
   const handleSetCookie = async () => {
@@ -84,9 +93,12 @@ export function FinboxMarketplacePanel({
     return (
       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
         <p>{t("skills.finboxLoadError")}</p>
-        <Button variant="outline" onClick={handleRefresh} className="mt-4">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          {t("skills.retry")}
+        <p className="text-xs mt-2 text-muted-foreground/70">
+          {t("skills.finboxAuthHint")}
+        </p>
+        <Button variant="outline" onClick={handleOpenSSOLogin} className="mt-4">
+          <LogIn className="mr-2 h-4 w-4" />
+          {t("skills.finboxLogin")}
         </Button>
       </div>
     );
@@ -96,7 +108,7 @@ export function FinboxMarketplacePanel({
     <div className="flex flex-col gap-4">
       {/* SSO Cookie 配置栏 */}
       <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 bg-amber-50/30 px-3 py-2 dark:bg-amber-950/20">
-        <Key className="h-4 w-4 shrink-0 text-amber-600" />
+        <LogIn className="h-4 w-4 shrink-0 text-amber-600" />
         <span className="flex-1 text-xs text-muted-foreground">
           {hasCookie
             ? t("skills.finboxCookieConfigured")
@@ -118,14 +130,25 @@ export function FinboxMarketplacePanel({
             </Button>
           </div>
         ) : (
-          <Button
-            size="sm"
-            variant={hasCookie ? "outline" : "default"}
-            className="h-7 text-xs"
-            onClick={() => hasCookie ? handleClearCookie() : setShowCookieInput(true)}
-          >
-            {hasCookie ? t("skills.finboxClearCookie") : t("skills.finboxSetCookie")}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant={hasCookie ? "outline" : "default"}
+              className="h-7 text-xs"
+              onClick={() => hasCookie ? handleClearCookie() : setShowCookieInput(true)}
+            >
+              {hasCookie ? t("skills.finboxClearCookie") : t("skills.finboxManualSetCookie")}
+            </Button>
+            <Button
+              size="sm"
+              variant="default"
+              className="h-7 text-xs"
+              onClick={handleOpenSSOLogin}
+            >
+              <LogIn className="mr-1 h-3 w-3" />
+              {t("skills.finboxLogin")}
+            </Button>
+          </div>
         )}
       </div>
 
