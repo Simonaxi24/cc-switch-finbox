@@ -383,32 +383,36 @@ pub fn list_skill_projects(
     let home = dirs::home_dir()
         .ok_or_else(|| "无法获取 Home 目录".to_string())?;
 
-    // 扫描 Home 目录下所有子目录，查找 .claude/skills/
-    let mut projects = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&home) {
+    const MAX_DEPTH: usize = 5;
+    let mut projects = std::collections::HashSet::new();
+    let mut stack = vec![(home, 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            continue;
+        }
+        if dir.join(".claude").join("skills").is_dir() {
+            projects.insert(dir.display().to_string());
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() || path.file_name().map_or(false, |n| n.to_string_lossy().starts_with('.')) {
+            if !path.is_dir() {
                 continue;
             }
-            if path.join(".claude").join("skills").exists() {
-                projects.push(path.display().to_string());
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.')
+                || matches!(name.as_str(), "node_modules" | "target" | "dist" | "build" | "Library")
+            {
+                continue;
             }
-            // 也扫描子目录（最多两层）
-            if let Ok(sub_entries) = std::fs::read_dir(&path) {
-                for sub_entry in sub_entries.flatten() {
-                    let sub_path = sub_entry.path();
-                    if !sub_path.is_dir() || sub_path.file_name().map_or(false, |n| n.to_string_lossy().starts_with('.')) {
-                        continue;
-                    }
-                    if sub_path.join(".claude").join("skills").exists() {
-                        projects.push(sub_path.display().to_string());
-                    }
-                }
-            }
+            stack.push((path, depth + 1));
         }
     }
 
+    let mut projects: Vec<String> = projects.into_iter().collect();
     projects.sort();
     Ok(projects)
 }

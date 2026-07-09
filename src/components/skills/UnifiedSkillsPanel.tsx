@@ -207,7 +207,7 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   const handleImport = async (imports: ImportSkillSelection[]) => {
     try {
-      const imported = await importMutation.mutateAsync(imports);
+      const imported = await importMutation.mutateAsync({ imports });
       setImportDialogOpen(false);
       toast.success(t("skills.importSuccess", { count: imported.length }), {
         closeButton: true,
@@ -388,7 +388,9 @@ const UnifiedSkillsPanel = React.forwardRef<
 
       setLoadingProjectSkills((prev) => ({ ...prev, [projectPath]: true }));
       try {
+        console.log("DEBUG: scanUnmanaged called with projectPath:", projectPath);
         const result = await skillsApi.scanUnmanaged(projectPath);
+        console.log("DEBUG: scanUnmanaged result:", JSON.stringify(result));
         setProjectSkillsMap((prev) => ({ ...prev, [projectPath]: result }));
       } catch (err) {
         toast.error(t("common.error"), { description: String(err) });
@@ -533,38 +535,6 @@ const UnifiedSkillsPanel = React.forwardRef<
             {/* 项目级：已安装列表 + 扫描项目 */}
             {skillScope === "project" && (
               <div className="mb-4">
-                {/* 已安装的项目级 skill（复用全局 UI） */}
-                {isLoading ? (
-                  <div className="text-center py-6 text-muted-foreground">
-                    {t("skills.loading")}
-                  </div>
-                ) : skills && skills.length > 0 ? (
-                  <>
-                    <div className="text-sm font-medium mb-2 text-muted-foreground">
-                      {t("skills.installedProjectSkills", { count: skills.length })}
-                    </div>
-                    <TooltipProvider delayDuration={300}>
-                      <div className="rounded-xl border border-border-default overflow-hidden mb-4">
-                        {skills.map((skill, index) => (
-                          <InstalledSkillListItem
-                            key={skill.id}
-                            skill={skill}
-                            hasUpdate={!!updatesMap[skill.id]}
-                            isUpdating={
-                              updateSkillMutation.isPending &&
-                              updateSkillMutation.variables === skill.id
-                            }
-                            onToggleApp={handleToggleApp}
-                            onUninstall={() => handleUninstall(skill)}
-                            onUpdate={() => handleUpdateSkill(skill)}
-                            isLast={index === skills.length - 1}
-                          />
-                        ))}
-                      </div>
-                    </TooltipProvider>
-                  </>
-                ) : null}
-
                 {/* 扫描项目 */}
                 <div className="flex items-center gap-2 mb-3">
                   <Button
@@ -638,6 +608,37 @@ const UnifiedSkillsPanel = React.forwardRef<
                         {/* 展开该项目的 skill 列表 */}
                         {currentProjectPath === projPath && (
                           <div className="mt-1 pl-4 pb-2">
+                            {isLoading ? (
+                              <div className="text-xs text-muted-foreground py-2">
+                                {t("skills.loading")}
+                              </div>
+                            ) : skills && skills.length > 0 ? (
+                              <div className="mb-3">
+                                <div className="text-xs font-medium text-muted-foreground mb-1">
+                                  {t("skills.installedProjectSkills", { count: skills.length })}
+                                </div>
+                                <TooltipProvider delayDuration={300}>
+                                  <div className="rounded-lg border border-border-default overflow-hidden">
+                                    {skills.map((skill, index) => (
+                                      <InstalledSkillListItem
+                                        key={skill.id}
+                                        skill={skill}
+                                        hasUpdate={!!updatesMap[skill.id]}
+                                        isUpdating={
+                                          updateSkillMutation.isPending &&
+                                          updateSkillMutation.variables === skill.id
+                                        }
+                                        onToggleApp={handleToggleApp}
+                                        onUninstall={() => handleUninstall(skill)}
+                                        onUpdate={() => handleUpdateSkill(skill)}
+                                        isLast={index === skills.length - 1}
+                                      />
+                                    ))}
+                                  </div>
+                                </TooltipProvider>
+                              </div>
+                            ) : null}
+
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-xs text-muted-foreground">
                                 {t("skills.projectSkillsCount", {

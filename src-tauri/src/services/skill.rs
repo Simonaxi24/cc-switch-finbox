@@ -840,9 +840,19 @@ impl SkillService {
             let _ = Self::remove_from_app(&skill.directory, &app);
         }
 
-        // 从 SSOT 删除
-        let ssot_dir = Self::get_ssot_dir()?;
-        let skill_path = ssot_dir.join(&skill.directory);
+        // 从源目录删除：项目级删除项目 .claude/skills，其他删除 SSOT
+        let skill_path = if skill.scope == "project" {
+            let project_path = skill
+                .project_path
+                .as_deref()
+                .ok_or_else(|| anyhow!("项目级 Skill 缺少 project_path: {}", skill.id))?;
+            PathBuf::from(project_path)
+                .join(".claude")
+                .join("skills")
+                .join(&skill.directory)
+        } else {
+            Self::get_ssot_dir()?.join(&skill.directory)
+        };
         if skill_path.exists() {
             fs::remove_dir_all(&skill_path)?;
         }
@@ -1408,7 +1418,19 @@ impl SkillService {
 
         // 同步文件
         if enabled {
-            Self::sync_to_app_dir(&skill.directory, app)?;
+            if skill.scope == "project" {
+                let project_path = skill
+                    .project_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("项目级 Skill 缺少 project_path: {}", skill.id))?;
+                let source = PathBuf::from(project_path)
+                    .join(".claude")
+                    .join("skills")
+                    .join(&skill.directory);
+                Self::sync_source_to_app_dir(&source, &skill.directory, app)?;
+            } else {
+                Self::sync_to_app_dir(&skill.directory, app)?;
+            }
         } else {
             Self::remove_from_app(&skill.directory, app)?;
         }
@@ -1430,32 +1452,32 @@ impl SkillService {
         project_path: Option<&str>,
     ) -> Result<Vec<UnmanagedSkill>> {
         let managed_skills = db.get_all_installed_skills()?;
-        // 只过滤全局 skill（不过滤项目级），允许项目级和全局有同名 skill
         let managed_dirs: HashSet<String> = managed_skills
             .values()
-            .filter(|s| s.scope == "global")
+            .filter(|s| match project_path {
+                Some(pp) => s.scope == "project" && s.project_path.as_deref() == Some(pp),
+                None => s.scope == "global",
+            })
             .map(|s| s.directory.clone())
             .collect();
 
-        // 收集所有待扫描的目录及其来源标签
         let mut scan_sources: Vec<(PathBuf, String)> = Vec::new();
-        for app in AppType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
-                scan_sources.push((d, app.as_str().to_string()));
-            }
-        }
-        if let Some(agents_dir) = get_agents_skills_dir() {
-            scan_sources.push((agents_dir, "agents".to_string()));
-        }
-        if let Ok(ssot_dir) = Self::get_ssot_dir() {
-            scan_sources.push((ssot_dir, "cc-switch".to_string()));
-        }
-
-        // 项目级 skill：扫描 project_path/.claude/skills/ 目录
         if let Some(pp) = project_path {
-            let project_skills_dir = std::path::PathBuf::from(pp).join(".claude").join("skills");
+            let project_skills_dir = PathBuf::from(pp).join(".claude").join("skills");
             if project_skills_dir.exists() {
                 scan_sources.push((project_skills_dir, "project".to_string()));
+            }
+        } else {
+            for app in AppType::all() {
+                if let Ok(d) = Self::get_app_skills_dir(&app) {
+                    scan_sources.push((d, app.as_str().to_string()));
+                }
+            }
+            if let Some(agents_dir) = get_agents_skills_dir() {
+                scan_sources.push((agents_dir, "agents".to_string()));
+            }
+            if let Ok(ssot_dir) = Self::get_ssot_dir() {
+                scan_sources.push((ssot_dir, "cc-switch".to_string()));
             }
         }
 
@@ -1472,7 +1494,11 @@ impl SkillService {
                     continue;
                 }
                 let dir_name = entry.file_name().to_string_lossy().to_string();
-                if dir_name.starts_with('.') || managed_dirs.contains(&dir_name) {
+                // 项目级扫描源跳过 managed_dirs 过滤（允许和全局 skill 同名）
+                if label.as_str() != "project" && (dir_name.starts_with('.') || managed_dirs.contains(&dir_name)) {
+                    continue;
+                }
+                if label.as_str() == "project" && dir_name.starts_with('.') {
                     continue;
                 }
 
@@ -1517,24 +1543,23 @@ impl SkillService {
             imports.iter().map(|selection| selection.directory.as_str()),
         );
 
-        // 收集所有候选搜索目录
+        // 收集候选搜索目录。项目级导入只查项目目录，避免同名时误取全局源。
         let mut search_sources: Vec<(PathBuf, String)> = Vec::new();
-        for app in AppType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
-                search_sources.push((d, app.as_str().to_string()));
-            }
-        }
-        if let Some(agents_dir) = get_agents_skills_dir() {
-            search_sources.push((agents_dir, "agents".to_string()));
-        }
-        search_sources.push((ssot_dir.clone(), "cc-switch".to_string()));
-
-        // 项目级 skill 搜索目录
         if let Some(pp) = project_path {
             let project_skills = PathBuf::from(pp).join(".claude").join("skills");
             if project_skills.exists() {
                 search_sources.push((project_skills, "project".to_string()));
             }
+        } else {
+            for app in AppType::all() {
+                if let Ok(d) = Self::get_app_skills_dir(&app) {
+                    search_sources.push((d, app.as_str().to_string()));
+                }
+            }
+            if let Some(agents_dir) = get_agents_skills_dir() {
+                search_sources.push((agents_dir, "agents".to_string()));
+            }
+            search_sources.push((ssot_dir.clone(), "cc-switch".to_string()));
         }
 
         for selection in imports {
@@ -1565,26 +1590,30 @@ impl SkillService {
                 continue;
             }
 
-            // 复制到 SSOT
-            let dest = ssot_dir.join(&dir_name);
-            if !dest.exists() {
-                Self::copy_dir_recursive(&source, &dest)?;
-            }
+            let is_project_scope = project_path.is_some();
+            let skill_source = if is_project_scope {
+                source.clone()
+            } else {
+                let dest = ssot_dir.join(&dir_name);
+                if !dest.exists() {
+                    Self::copy_dir_recursive(&source, &dest)?;
+                }
+                dest
+            };
 
             // 解析元数据
-            let skill_md = dest.join("SKILL.md");
+            let skill_md = skill_source.join("SKILL.md");
             let (name, description) = Self::read_skill_name_desc(&skill_md, &dir_name);
 
             // 启用状态仅信任用户本次显式选择，不再根据“在哪些位置找到”自动推断。
             let apps = selection.apps;
 
             // 从 lock 文件提取仓库信息
-            let (id, repo_owner, repo_name, repo_branch, readme_url) =
+            let (base_id, repo_owner, repo_name, repo_branch, readme_url) =
                 build_repo_info_from_lock(&agents_lock, &dir_name);
 
             // 计算内容哈希
-            let ssot_skill_dir = ssot_dir.join(&dir_name);
-            let content_hash = Self::compute_dir_hash(&ssot_skill_dir).ok();
+            let content_hash = Self::compute_dir_hash(&skill_source).ok();
 
             // 创建记录（scope 根据 project_path 决定）
             let scope = if project_path.is_some() {
@@ -1593,6 +1622,13 @@ impl SkillService {
                 "global"
             };
             let project_path_value = project_path.map(|p| p.to_string());
+            let id = if let Some(pp) = project_path {
+                use sha2::Digest as _;
+                let project_hash = format!("{:x}", sha2::Sha256::digest(pp.as_bytes()));
+                format!("project:{}:{}", &project_hash[..8], dir_name)
+            } else {
+                base_id
+            };
 
             let skill = InstalledSkill {
                 id,
@@ -1665,8 +1701,15 @@ impl SkillService {
 
         let ssot_dir = Self::get_ssot_dir()?;
         let source = ssot_dir.join(directory);
+        Self::sync_source_to_app_dir(&source, directory, app)
+    }
 
-        Self::validate_sync_source_dir(&source, directory)?;
+    fn sync_source_to_app_dir(source: &Path, directory: &str, app: &AppType) -> Result<()> {
+        if matches!(app, AppType::ClaudeDesktop) {
+            return Ok(());
+        }
+
+        Self::validate_sync_source_dir(source, directory)?;
 
         let app_dir = Self::get_app_skills_dir(app)?;
         fs::create_dir_all(&app_dir)?;
@@ -2412,6 +2455,18 @@ impl SkillService {
     }
 
     fn resolve_uninstall_backup_source(skill: &InstalledSkill) -> Result<Option<PathBuf>> {
+        if skill.scope == "project" {
+            if let Some(project_path) = skill.project_path.as_deref() {
+                let project_skill_path = PathBuf::from(project_path)
+                    .join(".claude")
+                    .join("skills")
+                    .join(&skill.directory);
+                if project_skill_path.is_dir() {
+                    return Ok(Some(project_skill_path));
+                }
+            }
+        }
+
         let ssot_path = Self::get_ssot_dir()?.join(&skill.directory);
         if ssot_path.is_dir() {
             return Ok(Some(ssot_path));

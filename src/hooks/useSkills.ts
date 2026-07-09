@@ -200,10 +200,22 @@ export function useToggleSkillApp() {
  * - 默认 enabled: false：仅订阅共享缓存（如顶栏「导入」按钮的绿点提示），
  *   不主动触发扫描。两者共用同一 queryKey，面板扫描完成后绿点会自动亮起。
  */
-export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
+export function useScanUnmanagedSkills(
+  projectPathOrOptions?: string | { enabled?: boolean },
+  maybeOptions?: { enabled?: boolean },
+) {
+  const projectPath =
+    typeof projectPathOrOptions === "string" ? projectPathOrOptions : undefined;
+  const options =
+    typeof projectPathOrOptions === "string" ? maybeOptions : projectPathOrOptions;
   return useQuery({
-    queryKey: ["skills", "unmanaged"],
-    queryFn: () => skillsApi.scanUnmanaged(),
+    queryKey: [
+      "skills",
+      "unmanaged",
+      projectPath ? "project" : "global",
+      projectPath ?? null,
+    ],
+    queryFn: () => skillsApi.scanUnmanaged(projectPath),
     enabled: options?.enabled ?? false,
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
@@ -228,7 +240,14 @@ export function useImportSkillsFromApps() {
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
       // 刷新 unmanaged 列表（已被导入的应该移除）
-      queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
+      queryClient.invalidateQueries({
+        queryKey: [
+          "skills",
+          "unmanaged",
+          vars.projectPath ? "project" : "global",
+          vars.projectPath ?? null,
+        ],
+      });
     },
   });
 }
