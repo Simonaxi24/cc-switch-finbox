@@ -1430,8 +1430,10 @@ impl SkillService {
         project_path: Option<&str>,
     ) -> Result<Vec<UnmanagedSkill>> {
         let managed_skills = db.get_all_installed_skills()?;
+        // 只过滤全局 skill（不过滤项目级），允许项目级和全局有同名 skill
         let managed_dirs: HashSet<String> = managed_skills
             .values()
+            .filter(|s| s.scope == "global")
             .map(|s| s.directory.clone())
             .collect();
 
