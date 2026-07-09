@@ -90,6 +90,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [skillScope, setSkillScope] = useState<"global" | "project">("global");
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
+  const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
   // 项目列表（从 list_skill_projects 获取）
   const [projectList, setProjectList] = useState<string[] | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -372,6 +373,7 @@ const UnifiedSkillsPanel = React.forwardRef<
     try {
       const list = await skillsApi.listSkillProjects();
       setProjectList(list);
+      await Promise.all(list.map((projectPath) => loadProjectGroup(projectPath, true)));
       if (list.length === 0) {
         toast.info(t("skills.noProjectSkillsFound"));
       } else {
@@ -387,6 +389,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   const loadProjectGroup = useCallback(
     async (projectPath: string, force = false) => {
       setCurrentProjectPath(projectPath);
+      setExpandedProjectPaths((prev) => new Set(prev).add(projectPath));
       if (!force && projectManagedSkillsMap[projectPath] && projectUnmanagedSkillsMap[projectPath]) {
         return;
       }
@@ -410,9 +413,17 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   const handleSelectProject = useCallback(
     async (projectPath: string) => {
+      if (expandedProjectPaths.has(projectPath)) {
+        setExpandedProjectPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(projectPath);
+          return next;
+        });
+        return;
+      }
       await loadProjectGroup(projectPath);
     },
-    [loadProjectGroup],
+    [expandedProjectPaths, loadProjectGroup],
   );
 
   const handleTakeOverProjectSkill = useCallback(
@@ -641,18 +652,18 @@ const UnifiedSkillsPanel = React.forwardRef<
                           <span className="text-xs text-muted-foreground/60 shrink-0 truncate max-w-[200px]">
                             {projPath}
                           </span>
-                          {currentProjectPath === projPath && (
+                          {expandedProjectPaths.has(projPath) && (
                             <Badge variant="default" className="text-[10px] px-1 h-4">
                               {t("skills.selected")}
                             </Badge>
                           )}
-                          {currentProjectPath !== projPath && (
+                          {!expandedProjectPaths.has(projPath) && (
                             <ChevronRight className="h-3 w-3 shrink-0" />
                           )}
                         </button>
 
                         {/* 展开该项目的 skill 列表 */}
-                        {currentProjectPath === projPath && (
+                        {expandedProjectPaths.has(projPath) && (
                           <div className="mt-1 pl-4 pb-2">
                             {loadingProjectSkills[projPath] ? (
                               <div className="flex items-center gap-1 text-xs text-muted-foreground py-2">
