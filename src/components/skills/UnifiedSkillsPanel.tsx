@@ -530,9 +530,42 @@ const UnifiedSkillsPanel = React.forwardRef<
               </Button>
             </div>
 
-            {/* 项目级：扫描按钮 */}
+            {/* 项目级：已安装列表 + 扫描项目 */}
             {skillScope === "project" && (
-              <>
+              <div className="mb-4">
+                {/* 已安装的项目级 skill（复用全局 UI） */}
+                {isLoading ? (
+                  <div className="text-center py-6 text-muted-foreground">
+                    {t("skills.loading")}
+                  </div>
+                ) : skills && skills.length > 0 ? (
+                  <>
+                    <div className="text-sm font-medium mb-2 text-muted-foreground">
+                      {t("skills.installedProjectSkills", { count: skills.length })}
+                    </div>
+                    <TooltipProvider delayDuration={300}>
+                      <div className="rounded-xl border border-border-default overflow-hidden mb-4">
+                        {skills.map((skill, index) => (
+                          <InstalledSkillListItem
+                            key={skill.id}
+                            skill={skill}
+                            hasUpdate={!!updatesMap[skill.id]}
+                            isUpdating={
+                              updateSkillMutation.isPending &&
+                              updateSkillMutation.variables === skill.id
+                            }
+                            onToggleApp={handleToggleApp}
+                            onUninstall={() => handleUninstall(skill)}
+                            onUpdate={() => handleUpdateSkill(skill)}
+                            isLast={index === skills.length - 1}
+                          />
+                        ))}
+                      </div>
+                    </TooltipProvider>
+                  </>
+                ) : null}
+
+                {/* 扫描项目 */}
                 <div className="flex items-center gap-2 mb-3">
                   <Button
                     type="button"
@@ -568,9 +601,12 @@ const UnifiedSkillsPanel = React.forwardRef<
                   </div>
                 )}
 
-                {/* 项目平铺列表 */}
+                {/* 未安装的项目列表（可折叠） */}
                 {projectList && projectList.length > 0 && (
                   <div className="mb-4 rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      {t("skills.unmanagedProjectSkills", { count: projectList.length })}
+                    </div>
                     {projectList.map((projPath) => (
                       <div
                         key={projPath}
@@ -594,12 +630,14 @@ const UnifiedSkillsPanel = React.forwardRef<
                               {t("skills.selected")}
                             </Badge>
                           )}
+                          {currentProjectPath !== projPath && (
+                            <ChevronRight className="h-3 w-3 shrink-0" />
+                          )}
                         </button>
 
-                        {/* 该项目的 skill 列表 */}
+                        {/* 展开该项目的 skill 列表 */}
                         {currentProjectPath === projPath && (
                           <div className="mt-1 pl-4 pb-2">
-                            {/* 导入按钮 */}
                             <div className="flex items-center justify-between mb-2">
                               <span className="text-xs text-muted-foreground">
                                 {t("skills.projectSkillsCount", {
@@ -663,7 +701,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                     ))}
                   </div>
                 )}
-              </>
+              </div>
             )}
 
             {/* 全局 skill 列表（只在 global scope 时显示） */}

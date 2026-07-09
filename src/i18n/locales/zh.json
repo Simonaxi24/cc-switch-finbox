@@ -2161,6 +2161,8 @@
     "enterProjectPathFirst": "请先输入项目路径",
     "projectSkillsCount": "{{count}} 个 Skill",
     "importToCcSwitch": "导入到 CC-Switch",
+    "installedProjectSkills": "已安装 {{count}} 个项目级 Skill",
+    "unmanagedProjectSkills": "{{count}} 个项目可扫描",
     "installedTab": "已安装",
     "finboxTab": "Finbox",
     "searchFinbox": "搜索 Finbox Skill...",
