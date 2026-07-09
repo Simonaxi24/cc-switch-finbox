@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
   ChevronRight,
-  Download,
   FolderOpen,
   Loader2,
   Search,
@@ -69,10 +68,26 @@ export function ProjectSkillsPanel({
       }));
 
       try {
-        const [managed, unmanaged] = await Promise.all([
+        let [managed, unmanaged] = await Promise.all([
           skillsApi.getInstalled(projectPath),
           skillsApi.scanUnmanaged(projectPath),
         ]);
+        if (unmanaged.length > 0) {
+          const imports: ImportSkillSelection[] = unmanaged.map((skill) => ({
+            directory: skill.directory,
+            apps: {
+              claude: true,
+              codex: false,
+              gemini: false,
+              opencode: false,
+              openclaw: false,
+              hermes: false,
+            },
+          }));
+          const imported = await importMutation.mutateAsync({ imports, projectPath });
+          managed = [...managed, ...imported];
+          unmanaged = [];
+        }
         setGroups((prev) => ({
           ...prev,
           [projectPath]: { managed, unmanaged, loading: false, loaded: true },
@@ -90,7 +105,7 @@ export function ProjectSkillsPanel({
         toast.error(t("common.error"), { description: String(error) });
       }
     },
-    [groups, t],
+    [groups, importMutation, t],
   );
 
   const scanProjects = useCallback(async () => {
@@ -124,80 +139,6 @@ export function ProjectSkillsPanel({
       await loadProject(projectPath);
     },
     [expandedProjects, loadProject],
-  );
-
-  const takeOverSkill = useCallback(
-    async (projectPath: string, skill: UnmanagedSkill) => {
-      const imports: ImportSkillSelection[] = [
-        {
-          directory: skill.directory,
-          apps: {
-            claude: true,
-            codex: false,
-            gemini: false,
-            opencode: false,
-            openclaw: false,
-            hermes: false,
-          },
-        },
-      ];
-
-      try {
-        const imported = await importMutation.mutateAsync({ imports, projectPath });
-        setGroups((prev) => {
-          const group = prev[projectPath] ?? { managed: [], unmanaged: [], loading: false, loaded: true };
-          return {
-            ...prev,
-            [projectPath]: {
-              ...group,
-              managed: [...group.managed, ...imported],
-              unmanaged: group.unmanaged.filter((item) => item.directory !== skill.directory),
-            },
-          };
-        });
-        toast.success(t("skills.importSuccess", { count: imported.length }), { closeButton: true });
-      } catch (error) {
-        toast.error(t("common.error"), { description: String(error) });
-      }
-    },
-    [importMutation, t],
-  );
-
-  const takeOverAll = useCallback(
-    async (projectPath: string) => {
-      const unmanaged = groups[projectPath]?.unmanaged ?? [];
-      if (unmanaged.length === 0) return;
-      const imports: ImportSkillSelection[] = unmanaged.map((skill) => ({
-        directory: skill.directory,
-        apps: {
-          claude: true,
-          codex: false,
-          gemini: false,
-          opencode: false,
-          openclaw: false,
-          hermes: false,
-        },
-      }));
-
-      try {
-        const imported = await importMutation.mutateAsync({ imports, projectPath });
-        setGroups((prev) => {
-          const group = prev[projectPath] ?? { managed: [], unmanaged: [], loading: false, loaded: true };
-          return {
-            ...prev,
-            [projectPath]: {
-              ...group,
-              managed: [...group.managed, ...imported],
-              unmanaged: [],
-            },
-          };
-        });
-        toast.success(t("skills.importSuccess", { count: imported.length }), { closeButton: true });
-      } catch (error) {
-        toast.error(t("common.error"), { description: String(error) });
-      }
-    },
-    [groups, importMutation, t],
   );
 
   return (
@@ -283,54 +224,9 @@ export function ProjectSkillsPanel({
                           </div>
                         )}
 
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-muted-foreground">
-                            {t("skills.projectSkillsCount", { count: unmanagedCount })}
-                          </span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs gap-1"
-                            onClick={() => takeOverAll(projectPath)}
-                            disabled={unmanagedCount === 0 || importMutation.isPending}
-                          >
-                            <Download className="h-3 w-3" />
-                            {t("skills.importToCcSwitch")}
-                          </Button>
-                        </div>
-
-                        {unmanagedCount === 0 ? (
+                        {managedCount === 0 && (
                           <div className="text-xs text-muted-foreground/60 py-2">
-                            {managedCount === 0 ? t("skills.noSkillsInProject") : t("skills.noUnmanagedFound")}
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            {group?.unmanaged.map((skill) => (
-                              <div
-                                key={`${projectPath}:${skill.directory}:${skill.path}`}
-                                className="flex items-center justify-between rounded py-1 px-1 hover:bg-muted/30 text-sm"
-                              >
-                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                                  <span className="font-medium truncate text-sm">{skill.name}</span>
-                                  {skill.description && (
-                                    <span className="text-xs text-muted-foreground/60 truncate">
-                                      {skill.description}
-                                    </span>
-                                  )}
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => takeOverSkill(projectPath, skill)}
-                                  disabled={importMutation.isPending}
-                                >
-                                  {t("skills.importToCcSwitch")}
-                                </Button>
-                              </div>
-                            ))}
+                            {t("skills.noSkillsInProject")}
                           </div>
                         )}
                       </>
