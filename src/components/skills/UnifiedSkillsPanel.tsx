@@ -79,10 +79,9 @@ const UnifiedSkillsPanel = React.forwardRef<
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [skillScope, setSkillScope] = useState<"global" | "project">("global");
-  const activeProjectPath = undefined;
   const { data: skills, isLoading } = useInstalledSkills(
-    activeProjectPath,
-    skillScope,
+    undefined,
+    "global",
   );
   const {
     data: skillBackups = [],
@@ -336,7 +335,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   React.useImperativeHandle(ref, () => ({
-    openDiscovery: () => onOpenDiscovery(skillScope, activeProjectPath),
+    openDiscovery: () => onOpenDiscovery(skillScope),
     openImport: handleOpenImport,
     openInstallFromZip: handleInstallFromZip,
     openRestoreFromBackup: handleOpenRestoreFromBackup,
