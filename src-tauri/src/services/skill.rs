@@ -1584,7 +1584,14 @@ impl SkillService {
             let ssot_skill_dir = ssot_dir.join(&dir_name);
             let content_hash = Self::compute_dir_hash(&ssot_skill_dir).ok();
 
-            // 创建记录
+            // 创建记录（scope 根据 project_path 决定）
+            let scope = if project_path.is_some() {
+                "project"
+            } else {
+                "global"
+            };
+            let project_path_value = project_path.map(|p| p.to_string());
+
             let skill = InstalledSkill {
                 id,
                 name,
@@ -1598,8 +1605,8 @@ impl SkillService {
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
-                scope: "global".to_string(),
-                project_path: None,
+                scope: scope.to_string(),
+                project_path: project_path_value,
             };
 
             // 保存到数据库
