@@ -4,7 +4,7 @@
 //! - 支持三应用开关（Claude/Codex/Gemini）
 //! - SSOT 存储在 ~/.cc-switch/skills/
 
-use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill};
+use crate::app_config::{AppType, InstalledSkill, UnmanagedSkill, SkillApps};
 use crate::error::format_skill_error;
 use crate::services::skill::{
     DiscoverableSkill, ImportSkillSelection, MigrationResult, Skill, SkillBackupEntry, SkillRepo,
@@ -12,6 +12,7 @@ use crate::services::skill::{
     SkillsShSearchResult,
 };
 use crate::store::AppState;
+use serde::Serialize;
 use std::str::FromStr;
 use std::sync::Arc;
 use tauri::State;
@@ -415,4 +416,74 @@ pub fn list_skill_projects(
     let mut projects: Vec<String> = projects.into_iter().collect();
     projects.sort();
     Ok(projects)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSkillEntry {
+    pub directory: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub path: String,
+    pub managed: Option<InstalledSkill>,
+    pub apps: SkillApps,
+}
+
+/// 直接列出某个项目 .claude/skills 下的 Skill，并合并 DB 中的项目级状态。
+#[tauri::command]
+pub fn list_project_skill_entries(
+    project_path: String,
+    app_state: State<'_, AppState>,
+) -> Result<Vec<ProjectSkillEntry>, String> {
+    let unmanaged = SkillService::scan_unmanaged(&app_state.db, Some(project_path.as_str()))
+        .map_err(|e| e.to_string())?;
+    if !unmanaged.is_empty() {
+        let imports = unmanaged
+            .iter()
+            .map(|skill| ImportSkillSelection {
+                directory: skill.directory.clone(),
+                apps: SkillApps::default(),
+            })
+            .collect::<Vec<_>>();
+        SkillService::import_from_apps(&app_state.db, imports, Some(project_path.as_str()))
+            .map_err(|e| e.to_string())?;
+    }
+
+    let managed = SkillService::get_skills_by_scope(&app_state.db, Some(project_path.as_str()))
+        .map_err(|e| e.to_string())?;
+
+    let mut by_directory = std::collections::BTreeMap::<String, ProjectSkillEntry>::new();
+
+    for skill in managed {
+        let path = std::path::PathBuf::from(&project_path)
+            .join(".claude")
+            .join("skills")
+            .join(&skill.directory)
+            .display()
+            .to_string();
+        by_directory.insert(
+            skill.directory.clone(),
+            ProjectSkillEntry {
+                directory: skill.directory.clone(),
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                path,
+                apps: skill.apps.clone(),
+                managed: Some(skill),
+            },
+        );
+    }
+
+    for skill in unmanaged {
+        by_directory.entry(skill.directory.clone()).or_insert_with(|| ProjectSkillEntry {
+            directory: skill.directory.clone(),
+            name: skill.name.clone(),
+            description: skill.description.clone(),
+            path: skill.path.clone(),
+            managed: None,
+            apps: SkillApps::default(),
+        });
+    }
+
+    Ok(by_directory.into_values().collect())
 }

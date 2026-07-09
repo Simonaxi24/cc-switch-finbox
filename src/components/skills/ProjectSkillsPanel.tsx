@@ -1,24 +1,12 @@
 import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ChevronDown,
-  ChevronRight,
-  FolderOpen,
-  Loader2,
-  Search,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, Loader2, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { skillsApi } from "@/lib/api";
 import type { AppId } from "@/lib/api/types";
-import type {
-  ImportSkillSelection,
-  InstalledSkill,
-  SkillUpdateInfo,
-  UnmanagedSkill,
-} from "@/lib/api/skills";
-import { useImportSkillsFromApps } from "@/hooks/useSkills";
+import type { InstalledSkill, ProjectSkillEntry, SkillUpdateInfo } from "@/lib/api/skills";
 import { toast } from "sonner";
 import { InstalledSkillListItem } from "./UnifiedSkillsPanel";
 
@@ -32,8 +20,7 @@ interface ProjectSkillsPanelProps {
 }
 
 interface ProjectGroupState {
-  managed: InstalledSkill[];
-  unmanaged: UnmanagedSkill[];
+  entries: ProjectSkillEntry[];
   loading: boolean;
   loaded: boolean;
 }
@@ -46,7 +33,6 @@ export function ProjectSkillsPanel({
   onUpdate,
 }: ProjectSkillsPanelProps) {
   const { t } = useTranslation();
-  const importMutation = useImportSkillsFromApps();
   const [projectPaths, setProjectPaths] = useState<string[] | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
@@ -56,48 +42,26 @@ export function ProjectSkillsPanel({
     async (projectPath: string, force = false) => {
       const existing = groups[projectPath];
       if (!force && existing?.loaded) return;
-
       setGroups((prev) => ({
         ...prev,
         [projectPath]: {
-          managed: prev[projectPath]?.managed ?? [],
-          unmanaged: prev[projectPath]?.unmanaged ?? [],
+          entries: prev[projectPath]?.entries ?? [],
           loading: true,
           loaded: prev[projectPath]?.loaded ?? false,
         },
       }));
 
       try {
-        let [managed, unmanaged] = await Promise.all([
-          skillsApi.getInstalled(projectPath),
-          skillsApi.scanUnmanaged(projectPath),
-        ]);
-        if (unmanaged.length > 0) {
-          const imports: ImportSkillSelection[] = unmanaged.map((skill) => ({
-            directory: skill.directory,
-            apps: {
-              claude: true,
-              codex: false,
-              gemini: false,
-              opencode: false,
-              openclaw: false,
-              hermes: false,
-            },
-          }));
-          const imported = await importMutation.mutateAsync({ imports, projectPath });
-          managed = [...managed, ...imported];
-          unmanaged = [];
-        }
+        const entries = await skillsApi.listProjectSkillEntries(projectPath);
         setGroups((prev) => ({
           ...prev,
-          [projectPath]: { managed, unmanaged, loading: false, loaded: true },
+          [projectPath]: { entries, loading: false, loaded: true },
         }));
       } catch (error) {
         setGroups((prev) => ({
           ...prev,
           [projectPath]: {
-            managed: prev[projectPath]?.managed ?? [],
-            unmanaged: prev[projectPath]?.unmanaged ?? [],
+            entries: prev[projectPath]?.entries ?? [],
             loading: false,
             loaded: true,
           },
@@ -105,7 +69,7 @@ export function ProjectSkillsPanel({
         toast.error(t("common.error"), { description: String(error) });
       }
     },
-    [groups, importMutation, t],
+    [groups, t],
   );
 
   const scanProjects = useCallback(async () => {
@@ -170,8 +134,7 @@ export function ProjectSkillsPanel({
             const group = groups[projectPath];
             const expanded = expandedProjects.has(projectPath);
             const projectName = projectPath.split("/").pop() || projectPath;
-            const managedCount = group?.managed.length ?? 0;
-            const unmanagedCount = group?.unmanaged.length ?? 0;
+            const entries = group?.entries ?? [];
 
             return (
               <div key={projectPath} className="border rounded-md bg-background">
@@ -186,7 +149,7 @@ export function ProjectSkillsPanel({
                     {projectPath}
                   </span>
                   <Badge variant="outline" className="text-[10px] px-1 h-4">
-                    {managedCount}/{unmanagedCount}
+                    {entries.length}
                   </Badge>
                   {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
                 </button>
@@ -198,38 +161,55 @@ export function ProjectSkillsPanel({
                         <Loader2 className="h-3 w-3 animate-spin" />
                         {t("skills.loading")}
                       </div>
+                    ) : entries.length === 0 ? (
+                      <div className="text-xs text-muted-foreground/60 py-2">
+                        {t("skills.noSkillsInProject")}
+                      </div>
                     ) : (
-                      <>
-                        {managedCount > 0 && (
-                          <div className="mb-3">
-                            <div className="text-xs font-medium text-muted-foreground mb-1">
-                              {t("skills.installedProjectSkills", { count: managedCount })}
-                            </div>
-                            <TooltipProvider delayDuration={300}>
-                              <div className="rounded-lg border border-border-default overflow-hidden">
-                                {group?.managed.map((skill, index) => (
-                                  <InstalledSkillListItem
-                                    key={skill.id}
-                                    skill={skill}
-                                    hasUpdate={!!updatesMap[skill.id]}
-                                    isUpdating={isUpdatingSkillId === skill.id}
-                                    onToggleApp={onToggleApp}
-                                    onUninstall={() => onUninstall(skill)}
-                                    onUpdate={() => onUpdate(skill)}
-                                    isLast={index === managedCount - 1}
-                                  />
-                                ))}
-                              </div>
-                            </TooltipProvider>
-                          </div>
-                        )}
+                      <TooltipProvider delayDuration={300}>
+                        <div className="rounded-lg border border-border-default overflow-hidden">
+                          {entries.map((entry, index) => {
+                            if (entry.managed) {
+                              return (
+                                <InstalledSkillListItem
+                                  key={entry.managed.id}
+                                  skill={entry.managed}
+                                  hasUpdate={!!updatesMap[entry.managed.id]}
+                                  isUpdating={isUpdatingSkillId === entry.managed.id}
+                                  onToggleApp={onToggleApp}
+                                  onUninstall={() => onUninstall(entry.managed!)}
+                                  onUpdate={() => onUpdate(entry.managed!)}
+                                  isLast={index === entries.length - 1}
+                                />
+                              );
+                            }
 
-                        {managedCount === 0 && (
-                          <div className="text-xs text-muted-foreground/60 py-2">
-                            {t("skills.noSkillsInProject")}
-                          </div>
-                        )}
-                      </>
+                            return (
+                              <div
+                                key={`${projectPath}:${entry.directory}:${entry.path}`}
+                                className="flex items-center justify-between px-3 py-2 border-b border-border-default last:border-b-0"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-sm truncate">{entry.name}</span>
+                                    <Badge variant="secondary" className="text-[10px] px-1 h-4">
+                                      {t("skills.projectScope")}
+                                    </Badge>
+                                  </div>
+                                  {entry.description && (
+                                    <div className="text-xs text-muted-foreground truncate" title={entry.description}>
+                                      {entry.description}
+                                    </div>
+                                  )}
+                                </div>
+                                <Button type="button" variant="ghost" size="icon" disabled>
+                                  <Trash2 className="h-4 w-4 opacity-40" />
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </TooltipProvider>
                     )}
                   </div>
                 )}

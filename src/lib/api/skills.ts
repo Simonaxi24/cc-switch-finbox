@@ -74,6 +74,15 @@ export interface UnmanagedSkill {
   path: string;
 }
 
+export interface ProjectSkillEntry {
+  directory: string;
+  name: string;
+  description?: string;
+  path: string;
+  managed?: InstalledSkill;
+  apps: SkillApps;
+}
+
 /** 导入已有 Skill 时提交的应用启用状态 */
 export interface ImportSkillSelection {
   directory: string;
@@ -200,6 +209,10 @@ export const skillsApi = {
   /** 列出 Home 目录下所有含有 .claude/skills/ 的项目路径 */
   async listSkillProjects(): Promise<string[]> {
     return await invoke("list_skill_projects");
+  },
+
+  async listProjectSkillEntries(projectPath: string): Promise<ProjectSkillEntry[]> {
+    return await invoke("list_project_skill_entries", { projectPath });
   },
 
   /** 从应用目录导入 Skills（可选 project_path 用于项目级导入） */
