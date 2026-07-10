@@ -2178,6 +2178,7 @@
     "finboxSSOLoginFailed": "打开登录窗口失败",
     "finboxLogin": "登录 Finbox",
     "finboxLoginSuccess": "Finbox 登录成功，正在加载 Skill 列表",
+    "finboxLoginPrompt": "请在打开的窗口中完成京东 SSO 登录，完成后手动关闭窗口",
     "finboxAuthHint": "点击下方按钮登录京东 SSO，登录完成后将自动获取数据",
     "finboxManualSetCookie": "手动输入",
     "cacheRefreshed": "缓存已刷新",

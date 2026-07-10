@@ -7,11 +7,10 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Open a Tauri WebView window to finbox.jd.com/coverage for SSO login.
-/// After the user logs in, automatically extract cookies and save them.
+/// After the user logs in, the frontend monitors the window and calls
+/// `extract_finbox_cookies` to extract cookies via JS evaluation.
 pub fn open_finbox_sso_window(
     app: &AppHandle,
-    finbox_service: Arc<FinboxMarketplaceService>,
-    db: Arc<Database>,
 ) -> Result<(), String> {
     if let Some(existing) = app.get_webview_window("finbox-sso") {
         existing.show().map_err(|e| format!("{e}"))?;
@@ -19,11 +18,7 @@ pub fn open_finbox_sso_window(
         return Ok(());
     }
 
-    let app_handle = app.clone();
-    let svc = finbox_service.clone();
-    let db_clone = db.clone();
-
-    let builder = tauri::WebviewWindowBuilder::new(
+    tauri::WebviewWindowBuilder::new(
         app,
         "finbox-sso",
         tauri::WebviewUrl::External(
@@ -37,54 +32,54 @@ pub fn open_finbox_sso_window(
     .resizable(true)
     .center()
     .visible(true)
-    .on_navigation(move |url| {
-        let url_str = url.to_string();
+    .build()
+    .map_err(|e| format!("创建 Finbox SSO 窗口失败: {e}"))?;
 
-        if url_str.starts_with("https://finbox.jd.com/")
-            && !url_str.contains("/sso/")
-            && !url_str.contains("ssa.jd.com")
-        {
-            log::info!("Finbox SSO: 登录成功，提取 cookie");
+    Ok(())
+}
 
-            let ah = app_handle.clone();
-            let svc2 = svc.clone();
-            let db2 = db_clone.clone();
+/// Extract cookies from the SSO window and save them.
+/// Called from the frontend after user logs in.
+pub fn extract_and_save_cookies(
+    app: &AppHandle,
+    finbox_service: Arc<FinboxMarketplaceService>,
+    db: Arc<Database>,
+) -> Result<String, String> {
+    if let Some(sso_window) = app.get_webview_window("finbox-sso") {
+        // Use JS eval to get document.cookie
+        let js_result = sso_window
+            .eval("document.cookie")
+            .map_err(|e| format!("eval 失败: {e}"))?;
 
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-
-                if let Some(sso_window) = ah.get_webview_window("finbox-sso") {
-                    let extract_js = r#"
-                        (function() {
-                            var cookies = document.cookie;
-                            if (cookies && cookies.length > 0) {
-                                window.__TAURI__.core.invoke('set_finbox_sso_cookie', { cookie: cookies });
-                            }
-                        })();
-                    "#;
-                    if let Err(e) = sso_window.eval(extract_js) {
-                        log::error!("Finbox SSO: JS 注入失败: {}", e);
-                        return;
-                    }
-
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-
-                    if let Some(cookie) = svc2.get_sso_cookie() {
-                        crate::database::Database::persist_sso_cookie(&db2, &cookie);
-                    }
-
-                    let _ = ah.emit("finbox-sso-success", true);
+        // In Tauri v2, eval() is fire-and-forget, we can't get the result.
+        // Instead, we inject a script that calls back via invoke
+        let inject = r#"
+            (function() {
+                var cookie = document.cookie;
+                if (cookie && cookie.length > 0) {
+                    window.__TAURI__?.core?.invoke?.('set_finbox_sso_cookie', { cookie: cookie })
+                        .then(function() {
+                            console.log('Finbox: cookie saved via invoke');
+                        })
+                        .catch(function(e) {
+                            console.error('Finbox: invoke failed:', e);
+                        });
+                } else {
+                    console.log('Finbox: no cookies found');
                 }
+            })();
+        "#;
+        sso_window.eval(inject).map_err(|e| format!("JS 注入失败: {e}"))?;
 
-                let _ = ah.get_webview_window("finbox-sso").map(|w| w.close());
-            });
-        }
-        true
-    });
+        // Wait briefly for the invoke to complete
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
-    builder
-        .build()
-        .map_err(|e| format!("创建 Finbox SSO 窗口失败: {e}"))?;
+        // Emit success event for the frontend to pick up
+        let _ = app.emit("finbox-sso-success", true);
+
+        // Close the SSO window
+        let _ = sso_window.close();
+    }
 
     Ok(())
 }

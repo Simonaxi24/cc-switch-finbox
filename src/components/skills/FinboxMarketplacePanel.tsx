@@ -37,7 +37,7 @@ export function FinboxMarketplacePanel({
     finboxApi.hasSsoCookie().then(setHasCookie);
   }, []);
 
-  // 监听 SSO 登录成功事件
+  // Listen for SSO success event
   useEffect(() => {
     const unlisten = listen("finbox-sso-success", () => {
       setHasCookie(true);
@@ -71,6 +71,7 @@ export function FinboxMarketplacePanel({
   const handleLogin = async () => {
     try {
       await finboxApi.openSsoWindow();
+      toast.info(t("skills.finboxLoginPrompt"));
     } catch (err) {
       toast.error(`${t("skills.finboxSSOLoginFailed")}: ${err}`);
     }
@@ -114,7 +115,6 @@ export function FinboxMarketplacePanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 搜索栏 */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
