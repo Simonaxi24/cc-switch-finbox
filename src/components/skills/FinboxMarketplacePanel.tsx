@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, RefreshCw, Download, ExternalLink, LogIn, X } from "lucide-react";
+import { Search, RefreshCw, Download, ExternalLink, LogIn } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { listen } from "@tauri-apps/api/event";
 import {
   useFinboxSkills,
   useInstallFromFinbox,
@@ -23,20 +24,30 @@ export function FinboxMarketplacePanel({
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [hasCookie, setHasCookie] = useState(false);
-  const [showCookieInput, setShowCookieInput] = useState(false);
-  const [cookieInput, setCookieInput] = useState("");
   const {
     data: skills,
     isLoading,
     error,
+    refetch,
   } = useFinboxSkills(searchQuery || undefined);
   const installMutation = useInstallFromFinbox();
   const refreshMutation = useRefreshFinboxCache();
 
-  // Check cookie status on mount
-  useState(() => {
+  useEffect(() => {
     finboxApi.hasSsoCookie().then(setHasCookie);
-  });
+  }, []);
+
+  // 监听 SSO 登录成功事件
+  useEffect(() => {
+    const unlisten = listen("finbox-sso-success", () => {
+      setHasCookie(true);
+      refetch();
+      toast.success(t("skills.finboxLoginSuccess"));
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [refetch, t]);
 
   const handleInstall = (key: string) => {
     installMutation.mutate(
@@ -57,101 +68,53 @@ export function FinboxMarketplacePanel({
     });
   };
 
-  const handleOpenSSOLogin = async () => {
+  const handleLogin = async () => {
     try {
       await finboxApi.openSsoWindow();
-      toast.success(t("skills.finboxSSOWindowOpened"));
     } catch (err) {
       toast.error(`${t("skills.finboxSSOLoginFailed")}: ${err}`);
     }
   };
 
-  const handleSetCookie = async () => {
-    if (!cookieInput.trim()) return;
-    try {
-      await finboxApi.setSsoCookie(cookieInput.trim());
-      setHasCookie(true);
-      setShowCookieInput(false);
-      setCookieInput("");
-      toast.success(t("skills.finboxCookieSet"));
-    } catch (err) {
-      toast.error(`${t("skills.finboxCookieFailed")}: ${err}`);
-    }
-  };
-
-  const handleClearCookie = async () => {
-    try {
-      await finboxApi.setSsoCookie("");
-      setHasCookie(false);
-      toast.info(t("skills.finboxCookieCleared"));
-    } catch (err) {
-      toast.error(`${err}`);
-    }
-  };
-
-  if (error) {
+  if (!hasCookie) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-        <p>{t("skills.finboxLoadError")}</p>
-        <p className="text-xs mt-2 text-muted-foreground/70">
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <LogIn className="h-12 w-12 mb-4 opacity-30" />
+        <h3 className="text-lg font-medium text-foreground mb-2">
+          {t("skills.finboxCookieNeeded")}
+        </h3>
+        <p className="text-sm text-center max-w-sm mb-6">
           {t("skills.finboxAuthHint")}
         </p>
-        <Button variant="outline" onClick={handleOpenSSOLogin} className="mt-4">
-          <LogIn className="mr-2 h-4 w-4" />
+        <Button onClick={handleLogin} size="lg" className="gap-2">
+          <LogIn className="h-4 w-4" />
           {t("skills.finboxLogin")}
         </Button>
       </div>
     );
   }
 
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+        <p>{t("skills.finboxLoadError")}</p>
+        <div className="flex gap-2 mt-4">
+          <Button variant="outline" onClick={handleLogin}>
+            <LogIn className="mr-2 h-4 w-4" />
+            {t("skills.finboxLogin")}
+          </Button>
+          <Button variant="outline" onClick={handleRefresh}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            {t("skills.retry")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      {/* SSO Cookie 配置栏 */}
-      <div className="flex items-center gap-2 rounded-lg border border-dashed border-amber-500/50 bg-amber-50/30 px-3 py-2 dark:bg-amber-950/20">
-        <LogIn className="h-4 w-4 shrink-0 text-amber-600" />
-        <span className="flex-1 text-xs text-muted-foreground">
-          {hasCookie
-            ? t("skills.finboxCookieConfigured")
-            : t("skills.finboxCookieNeeded")}
-        </span>
-        {showCookieInput ? (
-          <div className="flex items-center gap-1">
-            <Input
-              value={cookieInput}
-              onChange={(e) => setCookieInput(e.target.value)}
-              placeholder="sso_session_ticket=xxx; ..."
-              className="h-7 w-48 text-xs"
-            />
-            <Button size="sm" variant="default" className="h-7 text-xs" onClick={handleSetCookie}>
-              {t("skills.save")}
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 w-7 px-0" onClick={() => setShowCookieInput(false)}>
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1">
-            <Button
-              size="sm"
-              variant={hasCookie ? "outline" : "default"}
-              className="h-7 text-xs"
-              onClick={() => hasCookie ? handleClearCookie() : setShowCookieInput(true)}
-            >
-              {hasCookie ? t("skills.finboxClearCookie") : t("skills.finboxManualSetCookie")}
-            </Button>
-            <Button
-              size="sm"
-              variant="default"
-              className="h-7 text-xs"
-              onClick={handleOpenSSOLogin}
-            >
-              <LogIn className="mr-1 h-3 w-3" />
-              {t("skills.finboxLogin")}
-            </Button>
-          </div>
-        )}
-      </div>
-
+      {/* 搜索栏 */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

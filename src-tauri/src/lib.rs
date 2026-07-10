@@ -944,6 +944,7 @@ pub fn run() {
                 app_state.db.clone(),
                 app.handle().clone(),
             );
+            let db_for_finbox = app_state.db.clone();
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
 
@@ -966,6 +967,7 @@ pub fn run() {
 
             // 初始化 FinboxMarketplaceService
             let finbox_service = FinboxMarketplaceService::new();
+            crate::services::finbox_sso::load_persisted_sso_cookie(&db_for_finbox, &finbox_service);
             app.manage(commands::finbox_marketplace::FinboxServiceState(Arc::new(
                 finbox_service,
             )));
