@@ -42,11 +42,17 @@ pub struct FinboxSkillDetail {
 
 // ── API response types (match actual finbox.jd.com responses) ──
 
-/// GET /api/finbox/tools returns {"tools": [...]}
+/// GET /api/finbox/tools returns {"success": true, "tools": [...]}
 #[derive(Debug, Deserialize)]
 struct FinboxToolsResponse {
     #[serde(default)]
+    success: bool,
+    #[serde(default)]
     tools: Vec<FinboxToolRaw>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    detail: Option<String>,
 }
 
 /// Each tool in /api/finbox/tools
@@ -70,6 +76,18 @@ struct FinboxToolRaw {
     monthly_usage: Option<i64>,
     #[serde(default)]
     star_count: Option<i64>,
+    #[serde(default)]
+    attachments: Vec<FinboxAttachmentRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinboxAttachmentRaw {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    object_url: Option<String>,
 }
 
 // ── Service ──
@@ -93,9 +111,40 @@ impl FinboxMarketplaceService {
             .danger_accept_invalid_certs(true)
             .build()
             .unwrap_or_default();
+
+        // Auto-load SSO token from ~/.claude/sso_token.json
+        let sso_cookie = Self::load_sso_token_from_file();
+
         Self {
             client,
-            sso_cookie: std::sync::Mutex::new(None),
+            sso_cookie: std::sync::Mutex::new(sso_cookie),
+        }
+    }
+
+    /// Read SSO token from ~/.claude/sso_token.json and construct cookie string
+    fn load_sso_token_from_file() -> Option<String> {
+        let home = dirs::home_dir()?;
+        let path = home.join(".claude").join("sso_token.json");
+        let content = std::fs::read_to_string(&path).ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let token = parsed.get("ssoToken")?.as_str()?;
+        if token.is_empty() {
+            return None;
+        }
+        let cookie = format!(
+            "ssa.ticket={token}; sso.jd.com={token}; focus-client=WEB; focus-lang=zh_CN; focus-token-type=15; focus-login-switch=saas; jd.erp.lang=zh_CN"
+        );
+        log::info!("Finbox: SSO token loaded from ~/.claude/sso_token.json");
+        Some(cookie)
+    }
+
+    /// Reload SSO token from file (called when token expires)
+    pub fn reload_sso_token(&self) -> bool {
+        if let Some(cookie) = Self::load_sso_token_from_file() {
+            self.set_sso_cookie(cookie);
+            true
+        } else {
+            false
         }
     }
 
@@ -219,18 +268,42 @@ impl FinboxMarketplaceService {
         let parsed: FinboxToolsResponse = serde_json::from_str(&body)
             .map_err(|e| anyhow!("解析 Finbox tools 响应失败: {} — body prefix: {}", e, &body[..body.len().min(200)]))?;
 
-        Ok(parsed.tools.into_iter().map(|t| FinboxSkill {
-            key: t.id.clone(),
-            name: t.name,
-            description: t.description,
-            download_url: None,
-            category: t.category,
-            owner: t.owner,
-            version: t.version,
-            status: t.status,
-            download_count: t.download_count,
-            monthly_usage: t.monthly_usage,
-            star_count: t.star_count,
+        if !parsed.success {
+            let msg = parsed.error.as_deref().or(parsed.detail.as_deref()).unwrap_or("未知错误");
+            if msg.contains("sso_login_required") || msg.contains("登录") {
+                // Try reload SSO token
+                if self.reload_sso_token() {
+                    log::info!("Finbox: SSO token reloaded, retrying...");
+                    return Box::pin(self.fetch_tools()).await;
+                }
+            }
+            return Err(anyhow!("Finbox API 错误: {}", msg));
+        }
+
+        Ok(parsed.tools.into_iter().map(|t| {
+            let download_url = t.attachments.first()
+                .and_then(|a| a.object_url.as_ref())
+                .map(|u| {
+                    if u.starts_with("/") {
+                        format!("{}{}", FINBOX_BASE_URL, u)
+                    } else {
+                        u.clone()
+                    }
+                });
+
+            FinboxSkill {
+                key: t.id,
+                name: t.name,
+                description: t.description,
+                download_url,
+                category: t.category,
+                owner: t.owner,
+                version: t.version,
+                status: t.status,
+                download_count: t.download_count,
+                monthly_usage: t.monthly_usage,
+                star_count: t.star_count,
+            }
         }).collect())
     }
 
