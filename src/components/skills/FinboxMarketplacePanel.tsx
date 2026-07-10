@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, RefreshCw, Download, ExternalLink, LogIn } from "lucide-react";
+import { Search, RefreshCw, Download, LogIn } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -169,17 +169,6 @@ export function FinboxMarketplacePanel({
                 )}
               </div>
               <div className="ml-4 flex items-center gap-2">
-                {skill.downloadUrl && (
-                  <a
-                    href={skill.downloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Button variant="ghost" size="icon">
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </a>
-                )}
                 <Button
                   size="sm"
                   onClick={() => handleInstall(skill.key)}
