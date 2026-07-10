@@ -6,8 +6,6 @@ use log;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
-const FINBOX_SSO_COOKIE_KEY: &str = "finbox_sso_cookie";
-
 /// Open a Tauri WebView window to finbox.jd.com/coverage for SSO login.
 /// After the user logs in, automatically extract cookies and save them.
 pub fn open_finbox_sso_window(
@@ -72,12 +70,13 @@ pub fn open_finbox_sso_window(
                     std::thread::sleep(std::time::Duration::from_millis(500));
 
                     if let Some(cookie) = svc2.get_sso_cookie() {
-                        persist_sso_cookie(&db2, &cookie);
-                        let _ = ah.emit("finbox-sso-success", true);
+                        crate::database::Database::persist_sso_cookie(&db2, &cookie);
                     }
 
-                    let _ = sso_window.close();
+                    let _ = ah.emit("finbox-sso-success", true);
                 }
+
+                let _ = ah.get_webview_window("finbox-sso").map(|w| w.close());
             });
         }
         true
@@ -98,16 +97,6 @@ pub fn close_finbox_sso_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Persist SSO cookie to the settings table.
-pub fn persist_sso_cookie(db: &Arc<Database>, cookie: &str) {
-    if let Ok(conn) = db.conn.lock() {
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-            rusqlite::params![FINBOX_SSO_COOKIE_KEY, cookie],
-        );
-    }
-}
-
 /// Load persisted SSO cookie from DB and inject into FinboxMarketplaceService.
 pub fn load_persisted_sso_cookie(
     db: &Arc<Database>,
@@ -119,7 +108,7 @@ pub fn load_persisted_sso_cookie(
                 Ok(s) => s,
                 Err(_) => return,
             };
-            stmt.query_row(rusqlite::params![FINBOX_SSO_COOKIE_KEY], |row| {
+            stmt.query_row(rusqlite::params!["finbox_sso_cookie"], |row| {
                 row.get::<_, String>(0)
             })
             .ok()

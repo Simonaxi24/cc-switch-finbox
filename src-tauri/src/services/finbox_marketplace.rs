@@ -4,7 +4,6 @@ use crate::error::AppError;
 use crate::services::skill::{DiscoverableSkill, SkillService};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -21,6 +20,10 @@ pub struct FinboxSkill {
     pub description: Option<String>,
     pub download_url: Option<String>,
     pub category: Option<String>,
+    pub version: Option<String>,
+    pub download_count: Option<i64>,
+    pub monthly_usage: Option<i64>,
+    pub star_count: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,10 +34,12 @@ pub struct FinboxSkillDetail {
     pub description: Option<String>,
     pub download_url: Option<String>,
     pub category: Option<String>,
+    pub version: Option<String>,
     pub readme: Option<String>,
+    pub versions: Vec<FinboxToolVersion>,
 }
 
-/// Finbox `/finbox/tools` API response item
+/// Finbox `/api/finbox/tools` API response item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FinboxTool {
@@ -42,29 +47,34 @@ struct FinboxTool {
     name: String,
     description: Option<String>,
     owner: Option<String>,
-    // attachments are in versions, not directly on the tool
+    status: Option<String>,
+    version: Option<String>,
+    download_count: Option<i64>,
+    monthly_usage: Option<i64>,
+    star_count: Option<i64>,
+    // SKILL.md says: name, owner, download_count, monthly_usage, star_count, version, status
 }
 
-/// Finbox `/finbox/tools/{id}/versions` API response item
+/// Finbox `/api/finbox/tools/{id}/versions` API response item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FinboxToolVersion {
-    id: i64,
-    title: Option<String>,
+pub struct FinboxToolVersion {
+    pub id: i64,
+    pub title: Option<String>,
     #[serde(default)]
-    attachments: Vec<FinboxAttachment>,
+    pub attachments: Vec<FinboxAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FinboxAttachment {
-    id: i64,
-    file_name: Option<String>,
-    object_key: Option<String>,
-    object_url: Option<String>,
+pub struct FinboxAttachment {
+    pub id: i64,
+    pub file_name: Option<String>,
+    pub object_key: Option<String>,
+    pub object_url: Option<String>,
 }
 
-/// Finbox `/finbox/coverage/assets` API response item
+/// Finbox `/api/finbox/coverage/overview` API response item
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FinboxCoverageAsset {
@@ -92,7 +102,6 @@ struct FinboxApiResponse<T> {
 
 pub struct FinboxMarketplaceService {
     client: reqwest::Client,
-    /// JD SSO cookie（用户配置后使用）
     sso_cookie: std::sync::Mutex<Option<String>>,
 }
 
@@ -107,7 +116,6 @@ impl FinboxMarketplaceService {
         let client = reqwest::Client::builder()
             .user_agent("CC-Switch/3.17.0")
             .timeout(std::time::Duration::from_secs(30))
-            
             .build()
             .unwrap_or_default();
         Self {
@@ -116,26 +124,22 @@ impl FinboxMarketplaceService {
         }
     }
 
-    /// Set the JD SSO cookie for authenticated API requests.
     pub fn set_sso_cookie(&self, cookie: String) {
         if let Ok(mut guard) = self.sso_cookie.lock() {
             *guard = Some(cookie);
         }
     }
 
-    /// Get the current SSO cookie (if configured).
     pub fn get_sso_cookie(&self) -> Option<String> {
         self.sso_cookie.lock().ok().and_then(|g| g.clone())
     }
 
-    /// Check if SSO cookie is configured.
     pub fn has_sso_cookie(&self) -> bool {
         self.sso_cookie.lock().map(|g| g.is_some()).unwrap_or(false)
     }
 
     // ── Public API ──
 
-    /// Search Finbox marketplace skills, using the local SQLite cache first.
     pub async fn search_skills(
         &self,
         db: &Arc<Database>,
@@ -172,7 +176,6 @@ impl FinboxMarketplaceService {
             .collect())
     }
 
-    /// Get a single Finbox skill detail, refreshing the cache on miss.
     pub async fn get_skill_detail(
         &self,
         db: &Arc<Database>,
@@ -189,15 +192,12 @@ impl FinboxMarketplaceService {
         Ok(Self::to_detail(skill))
     }
 
-    /// Install a Finbox skill into CC Switch.
     pub async fn install_skill(
         &self,
         db: &Arc<Database>,
         key: &str,
         skill_service: &SkillService,
         current_app: &str,
-        scope: Option<&str>,
-        project_path: Option<&str>,
     ) -> Result<InstalledSkill> {
         let detail = self.get_skill_detail(db, key).await?;
         let download_url = detail
@@ -206,7 +206,6 @@ impl FinboxMarketplaceService {
             .ok_or_else(|| anyhow!("Skill '{}' has no download URL", key))?;
         let app_type = AppType::from_str(current_app)
             .map_err(|e| anyhow!("Invalid app type '{}': {}", current_app, e))?;
-        let scope = scope.unwrap_or("global");
 
         if Self::is_archive_url(download_url) {
             return self
@@ -216,11 +215,10 @@ impl FinboxMarketplaceService {
 
         let skill = Self::discoverable_from_detail(&detail, download_url)?;
         skill_service
-            .install(db, &skill, &app_type, scope, project_path)
+            .install(db, &skill, &app_type, "global", None)
             .await
     }
 
-    /// Force-refresh the Finbox marketplace cache via API.
     pub async fn refresh_cache(&self, db: &Arc<Database>) -> Result<()> {
         let skills = self.fetch_skills_from_api().await?;
         self.save_to_cache(db, &skills)?;
@@ -229,36 +227,33 @@ impl FinboxMarketplaceService {
 
     // ── API calls ──
 
-    /// Build an authenticated request builder with SSO cookie.
-    fn authed_request(&self, method: reqwest::Method, url: &str) -> Result<reqwest::RequestBuilder> {
+    fn authed_request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+    ) -> Result<reqwest::RequestBuilder> {
         let cookie = self.sso_cookie.lock()
             .map_err(|e| anyhow!("Mutex lock failed: {}", e))?
             .clone()
             .ok_or_else(|| anyhow!("未配置京东 SSO Cookie，请在设置中配置后再使用 Finbox 商场"))?;
 
-        Ok(self.client
+        Ok(self
+            .client
             .request(method, url)
             .header("Cookie", &cookie)
             .header("Cache-Control", "no-store, no-cache, must-revalidate")
             .header("Pragma", "no-cache"))
     }
 
-    /// Fetch skills from the Finbox API.
-    ///
-    /// Tries two endpoints in order:
-    /// 1. `/finbox/tools` — the tool/skill registry
-    /// 2. `/finbox/coverage/assets` — coverage assets (fallback)
     async fn fetch_skills_from_api(&self) -> Result<Vec<FinboxSkill>> {
-        // Try /finbox/tools first
+        // Primary: /api/finbox/tools (SKILL.md 文档列出的实际 API)
         match self.fetch_tools().await {
             Ok(skills) if !skills.is_empty() => return Ok(skills),
-            Ok(_) => { /* empty result, try fallback */ }
-            Err(e) => {
-                log::warn!("Finbox /finbox/tools failed: {}, trying fallback", e);
-            }
+            Ok(_) => {}
+            Err(e) => log::warn!("Finbox /api/finbox/tools 失败: {}, 尝试 coverage assets", e),
         }
 
-        // Fallback: /finbox/coverage/assets
+        // Fallback: /api/finbox/coverage/assets
         match self.fetch_coverage_assets().await {
             Ok(skills) if !skills.is_empty() => return Ok(skills),
             Ok(_) => Err(anyhow!("Finbox 返回了空的 skill 列表")),
@@ -266,9 +261,8 @@ impl FinboxMarketplaceService {
         }
     }
 
-    /// Fetch from /finbox/tools endpoint.
     async fn fetch_tools(&self) -> Result<Vec<FinboxSkill>> {
-        let url = format!("{}/finbox/tools", FINBOX_BASE_URL);
+        let url = format!("{}/api/finbox/tools", FINBOX_BASE_URL);
         let resp = self.authed_request(reqwest::Method::GET, &url)?
             .send()
             .await?;
@@ -277,7 +271,9 @@ impl FinboxMarketplaceService {
             return Err(anyhow!("SSO 登录已过期，请重新配置 Cookie"));
         }
 
-        let api_resp: FinboxApiResponse<Vec<FinboxTool>> = resp.json().await
+        let api_resp: FinboxApiResponse<Vec<FinboxTool>> = resp
+            .json()
+            .await
             .map_err(|e| anyhow!("解析 Finbox API 响应失败: {}", e))?;
 
         if !api_resp.success {
@@ -289,7 +285,6 @@ impl FinboxMarketplaceService {
         let mut skills = Vec::with_capacity(tools.len());
 
         for tool in tools {
-            // Try to get download URL from the latest version
             let download_url = self.fetch_tool_download_url(tool.id).await.ok();
 
             skills.push(FinboxSkill {
@@ -298,15 +293,18 @@ impl FinboxMarketplaceService {
                 description: tool.description,
                 download_url,
                 category: tool.owner,
+                version: None,
+                download_count: None,
+                monthly_usage: None,
+                star_count: None,
             });
         }
 
         Ok(skills)
     }
 
-    /// Get the download URL for a tool's latest version.
     async fn fetch_tool_download_url(&self, tool_id: i64) -> Result<String> {
-        let url = format!("{}/finbox/tools/{}/versions", FINBOX_BASE_URL, tool_id);
+        let url = format!("{}/api/finbox/tools/{}/versions", FINBOX_BASE_URL, tool_id);
         let resp = self.authed_request(reqwest::Method::GET, &url)?
             .send()
             .await?;
@@ -315,20 +313,25 @@ impl FinboxMarketplaceService {
             return Err(anyhow!("获取工具版本失败: HTTP {}", resp.status()));
         }
 
-        let api_resp: FinboxApiResponse<Vec<FinboxToolVersion>> = resp.json().await
+        let api_resp: FinboxApiResponse<Vec<FinboxToolVersion>> = resp
+            .json()
+            .await
             .map_err(|e| anyhow!("解析版本响应失败: {}", e))?;
 
         let versions = api_resp.data.unwrap_or_default();
         let latest = versions.into_iter().next();
 
         if let Some(version) = latest {
-            // Look for an attachment with a downloadable URL
             if let Some(attachment) = version.attachments.into_iter().next() {
                 if let Some(obj_url) = attachment.object_url {
                     return Ok(obj_url);
                 }
                 if let Some(obj_key) = attachment.object_key {
-                    return Ok(format!("{}/finbox/uploads/tool-attachments/{}/download", FINBOX_BASE_URL, obj_key));
+                    // Use the download URL pattern from Finbox
+                    return Ok(format!(
+                        "{}/finbox/static-pages/uploads/{}",
+                        FINBOX_BASE_URL, obj_key
+                    ));
                 }
             }
         }
@@ -336,9 +339,8 @@ impl FinboxMarketplaceService {
         Err(anyhow!("未找到可下载的版本"))
     }
 
-    /// Fetch from /finbox/coverage/assets endpoint (fallback).
     async fn fetch_coverage_assets(&self) -> Result<Vec<FinboxSkill>> {
-        let url = format!("{}/finbox/coverage/assets", FINBOX_BASE_URL);
+        let url = format!("{}/api/finbox/coverage/assets", FINBOX_BASE_URL);
         let resp = self.authed_request(reqwest::Method::GET, &url)?
             .send()
             .await?;
@@ -347,7 +349,9 @@ impl FinboxMarketplaceService {
             return Err(anyhow!("SSO 登录已过期，请重新配置 Cookie"));
         }
 
-        let api_resp: FinboxApiResponse<Vec<FinboxCoverageAsset>> = resp.json().await
+        let api_resp: FinboxApiResponse<Vec<FinboxCoverageAsset>> = resp
+            .json()
+            .await
             .map_err(|e| anyhow!("解析 Finbox Coverage Assets 响应失败: {}", e))?;
 
         if !api_resp.success {
@@ -367,6 +371,10 @@ impl FinboxMarketplaceService {
                 description: asset.description,
                 download_url: None,
                 category: asset.asset_ref,
+                version: None,
+                download_count: None,
+                monthly_usage: None,
+                star_count: None,
             })
             .collect())
     }
@@ -388,7 +396,6 @@ impl FinboxMarketplaceService {
             .map_err(|e| AppError::Database(e.to_string()))?;
 
         for skill in skills {
-            let html_hash = format!("api-{}", now);
             tx.execute(
                 "INSERT OR REPLACE INTO finbox_skill_cache \
                  (key, name, description, download_url, category, raw_html_hash, cached_at, expires_at) \
@@ -399,7 +406,7 @@ impl FinboxMarketplaceService {
                     skill.description,
                     skill.download_url,
                     skill.category,
-                    html_hash,
+                    format!("api-{}", now),
                     now,
                     expires_at,
                 ],
@@ -434,6 +441,10 @@ impl FinboxMarketplaceService {
                     description: row.get(2)?,
                     download_url: row.get(3)?,
                     category: row.get(4)?,
+                    version: None,
+                    download_count: None,
+                    monthly_usage: None,
+                    star_count: None,
                 })
             })
             .map_err(|e| AppError::Database(e.to_string()))?
@@ -465,6 +476,10 @@ impl FinboxMarketplaceService {
                     description: row.get(2)?,
                     download_url: row.get(3)?,
                     category: row.get(4)?,
+                    version: None,
+                    download_count: None,
+                    monthly_usage: None,
+                    star_count: None,
                 })
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -504,9 +519,18 @@ impl FinboxMarketplaceService {
             .ok_or_else(|| anyhow!("No skill installed from archive"))
     }
 
-    fn discoverable_from_detail(detail: &FinboxSkillDetail, download_url: &str) -> Result<DiscoverableSkill> {
-        let (repo_owner, repo_name, repo_branch, directory) = Self::parse_github_skill_url(download_url)
-            .ok_or_else(|| anyhow!("Finbox skill '{}' download URL is not a supported archive or GitHub repository URL: {}", detail.key, download_url))?;
+    fn discoverable_from_detail(
+        detail: &FinboxSkillDetail,
+        download_url: &str,
+    ) -> Result<DiscoverableSkill> {
+        let (repo_owner, repo_name, repo_branch, directory) =
+            Self::parse_github_skill_url(download_url).ok_or_else(|| {
+                anyhow!(
+                    "Finbox skill '{}' download URL is not a supported archive or GitHub repository URL: {}",
+                    detail.key,
+                    download_url
+                )
+            })?;
         let directory = if directory.is_empty() {
             Self::slugify(&detail.name)
         } else {
@@ -568,7 +592,9 @@ impl FinboxMarketplaceService {
             description: skill.description,
             download_url: skill.download_url,
             category: skill.category,
+            version: None,
             readme: None,
+            versions: Vec::new(),
         }
     }
 
@@ -594,4 +620,6 @@ impl FinboxMarketplaceService {
             slug
         }
     }
+}
+
 }

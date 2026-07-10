@@ -324,4 +324,14 @@ impl Database {
             .map_err(|e| AppError::Database(format!("序列化日志配置失败: {e}")))?;
         self.set_setting("log_config", &json)
     }
+
+    // --- Finbox SSO ---
+
+    pub fn persist_sso_cookie(&self, cookie: &str) {
+        let conn = lock_conn!(self.conn);
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params!["finbox_sso_cookie", cookie],
+        );
+    }
 }
