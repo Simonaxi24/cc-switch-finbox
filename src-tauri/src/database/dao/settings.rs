@@ -328,10 +328,11 @@ impl Database {
     // --- Finbox SSO ---
 
     pub fn persist_sso_cookie(&self, cookie: &str) {
-        let conn = lock_conn!(self.conn);
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
-            params!["finbox_sso_cookie", cookie],
-        );
+        if let Ok(conn) = self.conn.lock() {
+            let _ = conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                params!["finbox_sso_cookie", cookie],
+            );
+        }
     }
 }

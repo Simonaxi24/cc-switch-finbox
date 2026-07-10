@@ -37,8 +37,6 @@ pub async fn get_finbox_skill_detail(
 pub async fn install_from_finbox(
     key: String,
     current_app: String,
-    scope: Option<String>,
-    project_path: Option<String>,
     finbox_service: State<'_, FinboxServiceState>,
     skill_service: State<'_, crate::commands::skill::SkillServiceState>,
     app_state: State<'_, crate::commands::AppState>,
@@ -50,8 +48,6 @@ pub async fn install_from_finbox(
             &key,
             &skill_service.0,
             &current_app,
-            scope.as_deref(),
-            project_path.as_deref(),
         )
         .await
         .map_err(|e| e.to_string())

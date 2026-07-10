@@ -622,4 +622,3 @@ impl FinboxMarketplaceService {
     }
 }
 
-}
